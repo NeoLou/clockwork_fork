@@ -1,7 +1,7 @@
 #ifndef _CLOCKWORK_NETWORK_MESSAGE_H_
 #define _CLOCKWORK_NETWORK_MESSAGE_H_
 
-#include <clockwork.pb.h>
+// #include <clockwork.pb.h>
 #include <dmlc/logging.h>
 
 namespace clockwork {
@@ -48,7 +48,7 @@ public:
   virtual uint64_t get_tx_header_len() const { return msg.ByteSize(); }
 
   virtual void serialize_tx_header(void *dest) {
-    msg.SerializeWithCachedSizesToArray(reinterpret_cast<google::protobuf::uint8 *>(dest));
+    // msg.SerializeWithCachedSizesToArray(reinterpret_cast<google::protobuf::uint8 *>(dest));
   }
 
   virtual void tx_complete() {}

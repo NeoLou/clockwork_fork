@@ -61,12 +61,15 @@ multiple smaller batches, but might combine multiple requests into one
 single batch. */
 struct InferenceRequest {
 	RequestHeader header;
+	std::string uuid;
 	int model_id;
 	int batch_size;
 	size_t input_size;
 	void* input;
+	std::vector<int> input_shape;
 	uint64_t deadline = 0;
 	float slo_factor;
+	int slo;
 
 	// Not sent over the network; used by controller
 	uint64_t arrival = 0;

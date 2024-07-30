@@ -17,6 +17,10 @@
 #include "clockwork/sliding_window.h"
 #include "tbb/mutex.h"
 #include "tbb/queuing_mutex.h"
+// gRPC libraries
+#include <grpcpp/grpcpp.h>
+#include "cluster_comm.grpc.pb.h"
+#include "cluster_comm.pb.h"
 
 namespace clockwork {
 namespace scheduler {
@@ -229,6 +233,7 @@ class Scheduler : public clockwork::Scheduler {
         }
 
         bool has_demand() {
+            // If size of queue is more or equal to batchsize, we have demand
             return size() >= batchsize;
         }
 
@@ -471,7 +476,7 @@ class Scheduler : public clockwork::Scheduler {
     std::atomic_uint64_t next_infer = 0;
     std::atomic_uint64_t request_count = 0;
 
- private:
+ //private:
     // Threads
     std::string actions_filename;
     ControllerActionTelemetryLogger* printer;
@@ -485,6 +490,10 @@ class Scheduler : public clockwork::Scheduler {
 
     // Network executor
     NetworkExecutor* network = nullptr;
+
+    // Connection to Orion node controller
+    std::shared_ptr<grpc::Channel> channel_;
+    std::unique_ptr<cluster_comm::NodeController::Stub> stub_;
 
     // Messages
     struct TimeoutResult {
@@ -524,7 +533,10 @@ class Scheduler : public clockwork::Scheduler {
     // The actual scheduler interface implementation, invoked by worker network thread
     virtual void resultFromWorker(std::shared_ptr<workerapi::Result> result);
 
- private:
+    // Sending actions to Orion workers through gRPC
+    void grpc_send_action(InferAction* action);
+
+ //private:
 
     // Initialization methods
     void validate_clockwork_state(ClockworkState &state);

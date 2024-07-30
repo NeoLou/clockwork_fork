@@ -19,6 +19,17 @@ ModelLoadTracker::ModelLoadTracker(int64_t capacity, int model_id, int n_gpus) :
     }
 }
 
+/**
+* Calculates and returns a LoadTracker::Demand object containing information about the execution time of loading/infer.
+*
+* @param size The size of the request.
+* @param start_exec_by The time by which the execution should start.
+* @param start_loadweights_by The time by which the weights loading should start.
+*
+* @return A LoadTracker::Demand object containing information about the execution time of loading/infer.
+*
+* @throws None.
+*/
 LoadTracker::Demand ModelLoadTracker::addRequest(int64_t size, uint64_t start_exec_by, uint64_t start_loadweights_by) {
     LoadTracker::Demand demand;
     demand.exec_size = (size * capacity) / start_exec_by;
@@ -55,6 +66,13 @@ void ModelLoadTracker::loadComplete(int gpu_id, bool success) {
     events.push({gpu_id, success});
 }
 
+/**
+ * Attaches model priority from 'detached' to GPU by inserting 'priority' into GPU's 'cached' and 'not_cached'
+ *
+ * @param gpu The GPU which to attach to
+ *
+ * @throws None
+ */
 void LoadTracker::attach(GPU &gpu) {
     for (auto &priority : gpu.detached) {
         CHECK(priority->detached) << "Attaching model already attached";
@@ -62,7 +80,7 @@ void LoadTracker::attach(GPU &gpu) {
         // Put back in to priority queues
         if (priority->model->loading[gpu.id]) {
             // Loading on a GPU is neither loadable nor evictable
-        } else if (priority->model->gpus[gpu.id]) {
+        } else if (priority->model->gpus[gpu.id]) {  // if model is loaded
             gpu.cached.insert(priority);
         } else {
             gpu.not_cached.insert(priority);
@@ -74,8 +92,15 @@ void LoadTracker::attach(GPU &gpu) {
     gpu.detached.clear();
 }
 
+/**
+ * Detaches the model from the priority queues of all GPUs.
+ *
+ * @param model The model to detach from the priority queues
+ *
+ * @throws None
+ */
 void LoadTracker::detach(Model &model) {
-	// Remove from priority queues
+    // Remove from priority queues
     for (unsigned i = 0; i < n_gpus; i++) {
         auto &gpu = gpus[i];
         auto &priority = model.priorities[i];
@@ -102,12 +127,29 @@ void LoadTracker::detach(Model &model) {
 
 }
 
+/**
+ * Invalidates the priorities of a model if it's not stale, marking it as stale and adding it to the stale list for priority refreshing.
+ *
+ * @param model the model to invalidate priorities for
+ *
+ * @throws None
+ */
 void LoadTracker::invalidatePriorities(Model &model) {
     if (model.stale) return;
     model.stale = true;
     stale.push_back(&model);
 }
 
+/**
+ * Refreshes the priorities of the models in the stale list.
+ *
+ * This function iterates over each model in the stale list and calls the
+ * updatePriority function to update the priority of the model. It then sets
+ * the stale flag of the model to false. After updating all the models, the
+ * stale list is cleared.
+ *
+ * @throws None
+ */
 void LoadTracker::refreshPriorities() {
     for (auto &model : stale) {
         updatePriority(*model);
@@ -116,13 +158,22 @@ void LoadTracker::refreshPriorities() {
     stale.clear();
 }
 
+/**
+ * Updates the priority of a model based on its current state and the state of its GPUs.
+ *
+ * @param model The model whose priority is to be updated.  
+ *
+ * @throws std::logic_error If the model is not stale.
+ *
+ * @post The priority of each priority in the model's priorities vector is updated based on the model's state and the state of its GPUs.
+ */
 void LoadTracker::updatePriority(Model &model) {
     CHECK(model.stale) << "Updating priority on non-stale model";
 
     // Calculate each GPU's weight
     double total_weight = 0;
     for (unsigned i = 0; i < n_gpus; i++) {
-        if (model.gpus[i]) {
+        if (model.gpus[i]) {  // if model is loaded on that gpu
             total_weight += gpus[i].weight;
         }
         CHECK(model.priorities[i]->detached) << "Updating priority on attached model";
@@ -163,6 +214,11 @@ void LoadTracker::clearLoad(Model &model) {
     }
 }
 
+/**
+ * Calculates the total_weight of all the GPUs and distributes the allocation of the model on each GPU.
+ *
+ * @param model Reference to the Model object on which the load distribution is performed
+ */
 void LoadTracker::distributeLoad(Model &model) {
     // Update all the counters
     model.outstanding_exec -= model.completed_exec;
@@ -195,6 +251,14 @@ void LoadTracker::distributeLoad(Model &model) {
     }
 }
 
+/**
+ * Update flags indicating that the model is on the GPU and that it is loading on the GPU
+ *
+ * @param model The model loaded on gpu
+ * @param gpu The GPU loading the model
+ *
+ * @throws std::logic_error If the model is already on the GPU, if the model is already loading on the GPU, or if the GPU already thinks it has the model.
+ */
 void LoadTracker::addGPU(Model &model, GPU &gpu) {
     CHECK(!model.gpus[gpu.id]) << "Adding model to GPU that already has it";
     CHECK(!model.loading[gpu.id]) << "Adding model to GPU that is already loading it";
@@ -216,6 +280,15 @@ void LoadTracker::addGPUcomplete(Model &model, GPU &gpu) {
     model.last_used[gpu.id] = seqno_seed++;
 }
 
+/**
+ * Removes a model from GPU and updates the model and GPU state accordingly.
+ *
+ * @param model The model to remove the GPU from.
+ * @param gpu The GPU to remove.
+ * @param evicted Whether the GPU was evicted or not.
+ *
+ * @throws None
+ */
 void LoadTracker::removeGPU(Model &model, GPU &gpu, bool evicted) {
     CHECK(model.gpus[gpu.id]) << "Removing Model from GPU that doesn't have it";
     CHECK(gpu.models[model.id]) << "Removing Model from GPU that doesn't think it has it";
@@ -240,6 +313,14 @@ void LoadTracker::removeGPU(Model &model, GPU &gpu, bool evicted) {
     }
 }
 
+/**
+ * Looks for timed out requests, then detaches its models from GPUs, invalidates model priorities,
+ * and then re-distributes the load of the models on the GPUs accordingly.
+ *
+ * @param now the current time
+ *
+ * @throws None
+ */
 void LoadTracker::checkRequests(uint64_t now) {
     while (!requests.empty() && requests.top().time < now) {
         auto &request = requests.top();
@@ -286,33 +367,51 @@ n_models(num_models), n_gpus(num_gpus), capacity(capacity) {
     }            
 }
 
+/**
+ * Loads a model onto a GPU.
+ *
+ * @param gpu_id the ID of the GPU to load the model onto
+ * @param requires_eviction whether to evict the least recently used model if the GPU is out of memory
+ *
+ * @return the ID of the loaded model, or -1 if the GPU is out of memory or if the model is empty or if all demand is satisfied
+ *
+ * @throws None
+ */
 int LoadTracker::loadModel(int gpu_id, bool requires_eviction) {
     // Complete any pending requests
-    checkRequests(util::now());
+    checkRequests(util::now());  // Remove timed out requests and re-distributes load of models on GPUs
 
     auto &gpu = gpus[gpu_id];
 
     // Update and re-enqueue all models
-    refreshPriorities();
-    attach(gpu);
+    refreshPriorities(); // update load priority of models
+    attach(gpu);  // attach model to priority queues of gpu
 
-    if (gpu.not_cached.size() == 0) return -1;
+    if (gpu.not_cached.size() == 0) return -1;  // if no models to load
 
     auto &priority = *gpu.not_cached.begin();
-    if (priority->is_empty) return -1;
+    if (priority->is_empty) return -1;  // // if no models to load
     if (priority <= 0) return -1; // all demand satisfied
 
-
+    // Load model
     Model &model = *(priority->model);
-
-    detach(model);
-    invalidatePriorities(model);
-    addGPU(model, gpu);
-    distributeLoad(model);
+    detach(model);  // remove model from priority queues
+    invalidatePriorities(model);  // mark model as 'stale'
+    addGPU(model, gpu);  // update flags to indicate loading
+    distributeLoad(model);  // distribute allocation of load on GPUs
 
     return model.id;
 }
 
+/**
+ * Evicts a model from a GPU based on eviction policy (LRU)
+ *
+ * @param gpu_id the ID of the GPU from which to evict the model
+ *
+ * @return the ID of the evicted model, or -1 if no models are cached on the GPU
+ *
+ * @throws None
+ */
 int LoadTracker::evictModel(int gpu_id) {
     // Update and re-enqueue all models
     refreshPriorities();
@@ -332,17 +431,26 @@ int LoadTracker::evictModel(int gpu_id) {
     return model.id;
 }
 
+/**
+ * Processes a ModelLoadTracker by detaching the tracker model from GPUs, invalidating model priorities (by adding it to 'stale' queue),
+ * removing pending load demand (timed out requests), adding new requests (from tracker), processing completed requests, updating last
+ * used gpus for models, processing loadcomplete events, and re-distributing the model's load on gpus accordingly.
+ *
+ * @param tracker pointer to the ModelLoadTracker to process
+ *
+ * @throws None
+ */
 void LoadTracker::process(ModelLoadTracker* tracker) {
-    // Detach the model
+    // Detach the model from gpus, aka remove it from cache, etc.
     Model& model = models[tracker->model_id];
     detach(model);
-    invalidatePriorities(model);
+    invalidatePriorities(model); // add the model to the 'stale' queue
 
     // Remove pending load demand
     uint64_t now = util::now();
-    checkRequests(now);
+    checkRequests(now);  // remove timed out requests
 
-    // Add new requests
+    // Add new requests (from tracker)
     int64_t loadweights = tracker->new_loadweights.exchange(0);
     int64_t exec = tracker->new_exec.exchange(0);
     if (loadweights > 0) {
@@ -360,7 +468,7 @@ void LoadTracker::process(ModelLoadTracker* tracker) {
     model.completed_loadweights += tracker->delta_loadweights.exchange(0);
 
     // Update last used for models
-    for (int i = 0; i < tracker->touched.size(); i++) {
+    for (int i = 0; i < tracker->touched.size(); i++) { // touched[i] == true: gpu i was used recently
         if (tracker->touched[i]) {
             model.last_used[i] = seqno_seed++;
             tracker->touched[i] = false;
@@ -371,9 +479,9 @@ void LoadTracker::process(ModelLoadTracker* tracker) {
     ModelLoadTracker::LoadEvent event;
     while (tracker->events.try_pop(event)) {
         if (event.success) {
-            addGPUcomplete(model, gpus[event.gpu_id]);
+            addGPUcomplete(model, gpus[event.gpu_id]); // update flags (model.loading, model.last_used)
         } else {
-            removeGPU(model, gpus[event.gpu_id], false);
+            removeGPU(model, gpus[event.gpu_id], false); // update flags (model.gpus, model.loading, gpu.models, model.gpu_count, model.priorities)
         }
     }
     

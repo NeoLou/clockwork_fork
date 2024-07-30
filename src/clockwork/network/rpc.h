@@ -30,7 +30,7 @@ template<class TReq, class TRes>
 class net_rpc : public net_rpc_base
 {
 public:
-  net_rpc(std::function<void(TRes&)> c) : req(), comp(c) {}
+  // net_rpc(std::function<void(TRes&)> c) : req(), comp(c) {}
 
   virtual void set_id(uint64_t id) {
     net_rpc_base::set_id(id);
@@ -67,15 +67,15 @@ protected:
 public:
   TReq req;
   TRes *rsp;
-  std::function<void(TRes&)> comp;
+  // std::function<void(TRes&)> comp;
 };
 
 template<class TReq, class TRes>
 class net_rpc_receive_payload : public net_rpc<TReq, TRes>
 {
 public:
-  net_rpc_receive_payload(std::function<void(TRes&)> c)
-    : net_rpc<TReq, TRes>(c) {}
+  // net_rpc_receive_payload(std::function<void(TRes&)> c)
+  //   : net_rpc<TReq, TRes>(c) {}
 
 protected:
 
@@ -87,15 +87,15 @@ protected:
 };
 
 
-class net_rpc_conn :
-  public message_connection, public message_handler
+class net_rpc_conn //:
+  // public message_connection, public message_handler
 {
 
 public:
-  net_rpc_conn(asio::io_service& io_service)
-    : message_connection(io_service, *this), msg_tx_(this, *this), request_id_seed(0)
-  {
-  }
+  // net_rpc_conn(asio::io_service& io_service)
+  //   : message_connection(io_service, *this), msg_tx_(this, *this), request_id_seed(0)
+  // {
+  // }
 
 protected:
   virtual void request_done(net_rpc_base &req) {}
@@ -106,58 +106,58 @@ protected:
 
     uint64_t request_id = request_id_seed++;
     rb.set_id(request_id);
-    requests[request_id] = &rb;
-    msg_tx_.send_message(rb.request());
+    // requests[request_id] = &rb;
+    // msg_tx_.send_message(rb.request());
   }
 
-  virtual message_rx *new_rx_message(message_connection *tcp_conn, uint64_t header_len,
-      uint64_t body_len, uint64_t msg_type, uint64_t msg_id)
-  {
-    std::lock_guard<std::mutex> lock(requests_mutex);
+  // virtual message_rx *new_rx_message(message_connection *tcp_conn, uint64_t header_len,
+  //     uint64_t body_len, uint64_t msg_type, uint64_t msg_id)
+  // {
+  //   std::lock_guard<std::mutex> lock(requests_mutex);
 
-    auto it = requests.find(msg_id);
-    CHECK(it != requests.end()) << "No RPC request with ID " << msg_id;
+  //   auto it = requests.find(msg_id);
+  //   CHECK(it != requests.end()) << "No RPC request with ID " << msg_id;
 
-    auto rb = it->second;
-    message_rx &mrx = rb->make_response(msg_type, body_len);
+  //   auto rb = it->second;
+  //   message_rx &mrx = rb->make_response(msg_type, body_len);
 
-    return &mrx;
-  }
+  //   return &mrx;
+  // }
 
-  virtual void aborted_receive(message_connection *tcp_conn, message_rx *req)
-  {
-  }
+  // virtual void aborted_receive(message_connection *tcp_conn, message_rx *req)
+  // {
+  // }
 
-  virtual void completed_receive(message_connection *tcp_conn, message_rx *req)
-  {
-    net_rpc_base* rb = nullptr;
-    {
-      std::lock_guard<std::mutex> lock(requests_mutex);
+  // virtual void completed_receive(message_connection *tcp_conn, message_rx *req)
+  // {
+  //   net_rpc_base* rb = nullptr;
+  //   {
+  //     std::lock_guard<std::mutex> lock(requests_mutex);
 
-      uint64_t msg_id = req->get_msg_id();
-      auto it = requests.find(msg_id);
-      if (it != requests.end()) {
-        rb = it->second;
-        requests.erase(it);
-      }
-    }
-    CHECK(rb != nullptr) << "Received response to non-existent request";
+  //     uint64_t msg_id = req->get_msg_id();
+  //     auto it = requests.find(msg_id);
+  //     if (it != requests.end()) {
+  //       rb = it->second;
+  //       requests.erase(it);
+  //     }
+  //   }
+  //   CHECK(rb != nullptr) << "Received response to non-existent request";
     
-    rb->done();
-    request_done(*rb);
-  }
+  //   rb->done();
+  //   request_done(*rb);
+  // }
 
-  virtual void completed_transmit(message_connection *tcp_conn, message_tx *req)
-  {
-  }
+  // virtual void completed_transmit(message_connection *tcp_conn, message_tx *req)
+  // {
+  // }
 
-  virtual void aborted_transmit(message_connection *tcp_conn, message_tx *req)
-  {
-  }
+  // virtual void aborted_transmit(message_connection *tcp_conn, message_tx *req)
+  // {
+  // }
 
-  message_sender msg_tx_;
+  // message_sender msg_tx_;
   std::mutex requests_mutex;
-  std::map<uint64_t, net_rpc_base *> requests;
+  // std::map<uint64_t, net_rpc_base *> requests;
   std::atomic_int request_id_seed;
 
 };

@@ -23,16 +23,16 @@ public:
   }
 
   virtual ~infer_action_rx_using_io_pool() {
-    delete static_cast<uint8_t*>(body_);
+    // delete static_cast<uint8_t*>(body_);
   }
 
   virtual void get(workerapi::Infer &action) {
-  	infer_action_rx::get(action);
+  	// infer_action_rx::get(action);
 
-  	// Copy the input body into a cached page
-    action.input = host_io_pool->alloc(body_len_);
-    CHECK(action.input != nullptr) << "Unable to alloc from host_io_pool for infer action input";
-    std::memcpy(action.input, body_, body_len_);
+  	// // Copy the input body into a cached page
+    // action.input = host_io_pool->alloc(body_len_);
+    // CHECK(action.input != nullptr) << "Unable to alloc from host_io_pool for infer action input";
+    // std::memcpy(action.input, body_, body_len_);
   }
 };
 
@@ -46,15 +46,15 @@ public:
   }
 
   virtual ~infer_result_tx_using_io_pool() {
-  	delete static_cast<uint8_t*>(body_);
+  	// delete static_cast<uint8_t*>(body_);
   }
 
   virtual void set(workerapi::InferResult &result) {
   	// Memory allocated with cudaMallocHost doesn't play nicely with asio.
   	// Until we solve it, just do a memcpy here :(
   	infer_result_tx::set(result);
-    body_ = new uint8_t[result.output_size];
-    std::memcpy(body_, result.output, result.output_size);
+    // body_ = new uint8_t[result.output_size];
+    // std::memcpy(body_, result.output, result.output_size);
     host_io_pool->free(result.output);
   }
 
@@ -146,36 +146,36 @@ message_rx* Connection::new_rx_message(message_connection *tcp_conn, uint64_t he
 		uint64_t body_len, uint64_t msg_type, uint64_t msg_id) {
 	using namespace clockwork::workerapi;
 
-	if (msg_type == ACT_LOAD_MODEL_FROM_DISK) {
-		auto msg = new load_model_from_disk_action_rx();
-		msg->set_msg_id(msg_id);
-		return msg;
-	} else if (msg_type == ACT_LOAD_WEIGHTS) {
-		auto msg = new load_weights_action_rx();
-		msg->set_msg_id(msg_id);
-		return msg;
-	} else if (msg_type == ACT_INFER) {
-		// auto msg = new infer_action_rx_using_io_pool(worker->runtime->manager->host_io_pool);
-		auto msg = new infer_action_rx();
-		msg->set_body_len(body_len);
-		msg->set_msg_id(msg_id);
-		return msg;
-	} else if (msg_type == ACT_GET_WORKER_STATE) {
-		auto msg = new get_worker_state_action_rx();
-		msg->set_msg_id(msg_id);
-		return msg;
-	} else if (msg_type == ACT_EVICT_WEIGHTS) {
-		auto msg = new evict_weights_action_rx();
-		msg->set_msg_id(msg_id);
-		return msg;
-	} else if (msg_type == ACT_CLEAR_CACHE) {
-		auto msg = new clear_cache_action_rx();
-		msg->set_msg_id(msg_id);
-		return msg;
-	}
+	// if (msg_type == ACT_LOAD_MODEL_FROM_DISK) {
+	// 	auto msg = new load_model_from_disk_action_rx();
+	// 	msg->set_msg_id(msg_id);
+	// 	return msg;
+	// } else if (msg_type == ACT_LOAD_WEIGHTS) {
+	// 	auto msg = new load_weights_action_rx();
+	// 	msg->set_msg_id(msg_id);
+	// 	return msg;
+	// } else if (msg_type == ACT_INFER) {
+	// 	// auto msg = new infer_action_rx_using_io_pool(worker->runtime->manager->host_io_pool);
+	// 	auto msg = new infer_action_rx();
+	// 	msg->set_body_len(body_len);
+	// 	msg->set_msg_id(msg_id);
+	// 	return msg;
+	// } else if (msg_type == ACT_GET_WORKER_STATE) {
+	// 	auto msg = new get_worker_state_action_rx();
+	// 	msg->set_msg_id(msg_id);
+	// 	return msg;
+	// } else if (msg_type == ACT_EVICT_WEIGHTS) {
+	// 	auto msg = new evict_weights_action_rx();
+	// 	msg->set_msg_id(msg_id);
+	// 	return msg;
+	// } else if (msg_type == ACT_CLEAR_CACHE) {
+	// 	auto msg = new clear_cache_action_rx();
+	// 	msg->set_msg_id(msg_id);
+	// 	return msg;
+	// }
 	
-	CHECK(false) << "Unsupported msg_type " << msg_type;
-	return nullptr;
+	// CHECK(false) << "Unsupported msg_type " << msg_type;
+	// return nullptr;
 }
 
 void Connection::aborted_receive(message_connection *tcp_conn, message_rx *req) {
@@ -249,52 +249,52 @@ void Connection::aborted_transmit(message_connection *tcp_conn, message_tx *req)
 }
 
 void Connection::sendResult(std::shared_ptr<workerapi::Result> result) {
-	if (verbose) std::cout << "Sending " << result->str() << std::endl;
-	using namespace workerapi;
-	result->result_sent = util::now() - result->clock_delta;
-	if (auto load_model = std::dynamic_pointer_cast<LoadModelFromDiskResult>(result)) {
-		auto tx = new load_model_from_disk_result_tx();
-		tx->set(*load_model);
-		msg_tx_.send_message(*tx);
+	// if (verbose) std::cout << "Sending " << result->str() << std::endl;
+	// using namespace workerapi;
+	// result->result_sent = util::now() - result->clock_delta;
+	// if (auto load_model = std::dynamic_pointer_cast<LoadModelFromDiskResult>(result)) {
+	// 	auto tx = new load_model_from_disk_result_tx();
+	// 	tx->set(*load_model);
+	// 	msg_tx_.send_message(*tx);
 
-		if (!verbose) std::cout << "Sending " << result->str() << std::endl;
-	} else if (auto load_weights = std::dynamic_pointer_cast<LoadWeightsResult>(result)) {
-		auto tx = new load_weights_result_tx();
-		tx->set(*load_weights);
-		msg_tx_.send_message(*tx);
+	// 	if (!verbose) std::cout << "Sending " << result->str() << std::endl;
+	// } else if (auto load_weights = std::dynamic_pointer_cast<LoadWeightsResult>(result)) {
+	// 	auto tx = new load_weights_result_tx();
+	// 	tx->set(*load_weights);
+	// 	msg_tx_.send_message(*tx);
 
-	} else if (auto infer = std::dynamic_pointer_cast<InferResult>(result)) {
-		auto tx = new infer_result_tx_using_io_pool(worker->runtime->manager->host_io_pool);
-		tx->set(*infer);
-		msg_tx_.send_message(*tx);
+	// } else if (auto infer = std::dynamic_pointer_cast<InferResult>(result)) {
+	// 	auto tx = new infer_result_tx_using_io_pool(worker->runtime->manager->host_io_pool);
+	// 	tx->set(*infer);
+	// 	msg_tx_.send_message(*tx);
 
-	} else if (auto evict_weights = std::dynamic_pointer_cast<EvictWeightsResult>(result)) {
-		auto tx = new evict_weights_result_tx();
-		tx->set(*evict_weights);
-		msg_tx_.send_message(*tx);
+	// } else if (auto evict_weights = std::dynamic_pointer_cast<EvictWeightsResult>(result)) {
+	// 	auto tx = new evict_weights_result_tx();
+	// 	tx->set(*evict_weights);
+	// 	msg_tx_.send_message(*tx);
 
-	} else if (auto clear_cache = std::dynamic_pointer_cast<ClearCacheResult>(result)) {
-		auto tx = new clear_cache_result_tx();
-		tx->set(*clear_cache);
-		msg_tx_.send_message(*tx);
+	// } else if (auto clear_cache = std::dynamic_pointer_cast<ClearCacheResult>(result)) {
+	// 	auto tx = new clear_cache_result_tx();
+	// 	tx->set(*clear_cache);
+	// 	msg_tx_.send_message(*tx);
 
-	} else if (auto get_worker_state = std::dynamic_pointer_cast<GetWorkerStateResult>(result)) {
-		auto tx = new get_worker_state_result_tx();
-		tx->set(*get_worker_state);
-		msg_tx_.send_message(*tx);
+	// } else if (auto get_worker_state = std::dynamic_pointer_cast<GetWorkerStateResult>(result)) {
+	// 	auto tx = new get_worker_state_result_tx();
+	// 	tx->set(*get_worker_state);
+	// 	msg_tx_.send_message(*tx);
 
-		if (!verbose) std::cout << "Sending " << result->str() << std::endl;
-	} else if (auto error = std::dynamic_pointer_cast<ErrorResult>(result)) {
-		auto tx = new error_result_tx();
-		tx->set(*error);
-		msg_tx_.send_message(*tx);
+	// 	if (!verbose) std::cout << "Sending " << result->str() << std::endl;
+	// } else if (auto error = std::dynamic_pointer_cast<ErrorResult>(result)) {
+	// 	auto tx = new error_result_tx();
+	// 	tx->set(*error);
+	// 	msg_tx_.send_message(*tx);
 
-		stats.errors++;
-	} else {
-		CHECK(false) << "Sending an unsupported result type";
-	}
+	// 	stats.errors++;
+	// } else {
+	// 	CHECK(false) << "Sending an unsupported result type";
+	// }
 
-	stats.total_pending--;
+	// stats.total_pending--;
 }
 
 void Connection::ready() {

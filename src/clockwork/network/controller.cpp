@@ -17,43 +17,43 @@ message_rx* WorkerConnection::new_rx_message(message_connection *tcp_conn, uint6
 		uint64_t body_len, uint64_t msg_type, uint64_t msg_id) {
 	using namespace clockwork::workerapi;
 
-	if (msg_type == RES_ERROR) {
-		auto msg = new error_result_rx();
-		msg->set_msg_id(msg_id);
-		return msg;
+	// if (msg_type == RES_ERROR) {
+	// 	auto msg = new error_result_rx();
+	// 	msg->set_msg_id(msg_id);
+	// 	return msg;
 
-	} else if (msg_type == RES_LOAD_MODEL_FROM_DISK) {
-		auto msg = new load_model_from_disk_result_rx();
-		msg->set_msg_id(msg_id);
-		return msg;
+	// } else if (msg_type == RES_LOAD_MODEL_FROM_DISK) {
+	// 	auto msg = new load_model_from_disk_result_rx();
+	// 	msg->set_msg_id(msg_id);
+	// 	return msg;
 
-	} else if (msg_type == RES_LOAD_WEIGHTS) {
-		auto msg = new load_weights_result_rx();
-		msg->set_msg_id(msg_id);
-		return msg;
+	// } else if (msg_type == RES_LOAD_WEIGHTS) {
+	// 	auto msg = new load_weights_result_rx();
+	// 	msg->set_msg_id(msg_id);
+	// 	return msg;
 
-	} else if (msg_type == RES_INFER) {
-		auto msg = new infer_result_rx();
-		msg->set_body_len(body_len);
-		msg->set_msg_id(msg_id);
-		return msg;
+	// } else if (msg_type == RES_INFER) {
+	// 	auto msg = new infer_result_rx();
+	// 	msg->set_body_len(body_len);
+	// 	msg->set_msg_id(msg_id);
+	// 	return msg;
 
-	} else if (msg_type == RES_EVICT_WEIGHTS) {
-		auto msg = new evict_weights_result_rx();
-		msg->set_msg_id(msg_id);
-		return msg;
+	// } else if (msg_type == RES_EVICT_WEIGHTS) {
+	// 	auto msg = new evict_weights_result_rx();
+	// 	msg->set_msg_id(msg_id);
+	// 	return msg;
 
-	} else if (msg_type == RES_CLEAR_CACHE) {
-		auto msg = new clear_cache_result_rx();
-		msg->set_msg_id(msg_id);
-		return msg;
+	// } else if (msg_type == RES_CLEAR_CACHE) {
+	// 	auto msg = new clear_cache_result_rx();
+	// 	msg->set_msg_id(msg_id);
+	// 	return msg;
 
-	} else if (msg_type == RES_GET_WORKER_STATE) {
-		auto msg = new get_worker_state_result_rx();
-		msg->set_msg_id(msg_id);
-		return msg;
+	// } else if (msg_type == RES_GET_WORKER_STATE) {
+	// 	auto msg = new get_worker_state_result_rx();
+	// 	msg->set_msg_id(msg_id);
+	// 	return msg;
 
-	}
+	// }
 	
 	CHECK(false) << "Unsupported msg_type " << msg_type;
 	return nullptr;
@@ -136,40 +136,40 @@ void WorkerConnection::sendActions(std::vector<std::shared_ptr<workerapi::Action
 }
 
 void WorkerConnection::sendAction(std::shared_ptr<workerapi::Action> action) {
-	action->action_sent = util::now();
-	if (auto load_model = std::dynamic_pointer_cast<workerapi::LoadModelFromDisk>(action)) {
-		auto tx = new load_model_from_disk_action_tx();
-		tx->set(*load_model);
-		msg_tx_.send_message(*tx);
+	// action->action_sent = util::now();
+	// if (auto load_model = std::dynamic_pointer_cast<workerapi::LoadModelFromDisk>(action)) {
+	// 	auto tx = new load_model_from_disk_action_tx();
+	// 	tx->set(*load_model);
+	// 	msg_tx_.send_message(*tx);
 
-	} else if (auto load_weights = std::dynamic_pointer_cast<workerapi::LoadWeights>(action)) {
-		auto tx = new load_weights_action_tx();
-		tx->set(*load_weights);
-		msg_tx_.send_message(*tx);
+	// } else if (auto load_weights = std::dynamic_pointer_cast<workerapi::LoadWeights>(action)) {
+	// 	auto tx = new load_weights_action_tx();
+	// 	tx->set(*load_weights);
+	// 	msg_tx_.send_message(*tx);
 
-	} else if (auto infer = std::dynamic_pointer_cast<workerapi::Infer>(action)) {
-		auto tx = new infer_action_tx();
-		tx->set(*infer);
-		msg_tx_.send_message(*tx);
+	// } else if (auto infer = std::dynamic_pointer_cast<workerapi::Infer>(action)) {
+	// 	auto tx = new infer_action_tx();
+	// 	tx->set(*infer);
+	// 	msg_tx_.send_message(*tx);
 
-	} else if (auto evict_weights = std::dynamic_pointer_cast<workerapi::EvictWeights>(action)) {
-		auto tx = new evict_weights_action_tx();
-		tx->set(*evict_weights);
-		msg_tx_.send_message(*tx);
+	// } else if (auto evict_weights = std::dynamic_pointer_cast<workerapi::EvictWeights>(action)) {
+	// 	auto tx = new evict_weights_action_tx();
+	// 	tx->set(*evict_weights);
+	// 	msg_tx_.send_message(*tx);
 
-	} else if (auto clear_cache = std::dynamic_pointer_cast<workerapi::ClearCache>(action)) {
-		auto tx = new clear_cache_action_tx();
-		tx->set(*clear_cache);
-		msg_tx_.send_message(*tx);
+	// } else if (auto clear_cache = std::dynamic_pointer_cast<workerapi::ClearCache>(action)) {
+	// 	auto tx = new clear_cache_action_tx();
+	// 	tx->set(*clear_cache);
+	// 	msg_tx_.send_message(*tx);
 
-	} else if (auto get_worker_state = std::dynamic_pointer_cast<workerapi::GetWorkerState>(action)) {
-		auto tx = new get_worker_state_action_tx();
-		tx->set(*get_worker_state);
-		msg_tx_.send_message(*tx);
+	// } else if (auto get_worker_state = std::dynamic_pointer_cast<workerapi::GetWorkerState>(action)) {
+	// 	auto tx = new get_worker_state_action_tx();
+	// 	tx->set(*get_worker_state);
+	// 	msg_tx_.send_message(*tx);
 
-	} else {
-		CHECK(false) << "Sending an unsupported action type";
-	}
+	// } else {
+	// 	CHECK(false) << "Sending an unsupported action type";
+	// }
 }
 
 void WorkerConnection::setTransmitCallback(Callback callback) {
@@ -236,39 +236,39 @@ ClientConnection::ClientConnection(asio::io_service &io_service, Server* server)
 
 message_rx* ClientConnection::new_rx_message(message_connection *tcp_conn, uint64_t header_len,
 		uint64_t body_len, uint64_t msg_type, uint64_t msg_id) {
-	using namespace clockwork::clientapi;
+	// using namespace clockwork::clientapi;
 
-	if (msg_type == REQ_INFERENCE) {
-		auto msg = new msg_inference_req_rx();
-		msg->set_body_len(body_len);
-		msg->set_msg_id(msg_id);
-		return msg;
+	// if (msg_type == REQ_INFERENCE) {
+	// 	auto msg = new msg_inference_req_rx();
+	// 	msg->set_body_len(body_len);
+	// 	msg->set_msg_id(msg_id);
+	// 	return msg;
 
-	} else if (msg_type == REQ_EVICT) {
-		auto msg = new msg_evict_req_rx();
-		msg->set_msg_id(msg_id);
-		return msg;
+	// } else if (msg_type == REQ_EVICT) {
+	// 	auto msg = new msg_evict_req_rx();
+	// 	msg->set_msg_id(msg_id);
+	// 	return msg;
 
-	} else if (msg_type == REQ_LOAD_REMOTE_MODEL) {
-		auto msg = new msg_load_remote_model_req_rx();
-		msg->set_msg_id(msg_id);
-		return msg;
+	// } else if (msg_type == REQ_LOAD_REMOTE_MODEL) {
+	// 	auto msg = new msg_load_remote_model_req_rx();
+	// 	msg->set_msg_id(msg_id);
+	// 	return msg;
 
-	} else if (msg_type == REQ_UPLOAD_MODEL) {
-		auto msg = new msg_upload_model_req_rx();
-		msg->set_body_len(body_len);
-		msg->set_msg_id(msg_id);
-		return msg;
+	// } else if (msg_type == REQ_UPLOAD_MODEL) {
+	// 	auto msg = new msg_upload_model_req_rx();
+	// 	msg->set_body_len(body_len);
+	// 	msg->set_msg_id(msg_id);
+	// 	return msg;
 
-	} else if (msg_type == REQ_LS) {
-		auto msg = new msg_ls_req_rx();
-		msg->set_msg_id(msg_id);
-		return msg;
+	// } else if (msg_type == REQ_LS) {
+	// 	auto msg = new msg_ls_req_rx();
+	// 	msg->set_msg_id(msg_id);
+	// 	return msg;
 
-	}
+	// }
 	
-	CHECK(false) << "Unsupported msg_type " << msg_type;
-	return nullptr;
+	// CHECK(false) << "Unsupported msg_type " << msg_type;
+	// return nullptr;
 }
 
 void ClientConnection::ready() {
@@ -389,68 +389,68 @@ void Server::completed_receive(ClientConnection* client, message_rx *req) {
 
 
 void Server::process_message(ClientConnection* client, message_rx *req) {
-	int request_id = req->get_msg_id();
+	// int request_id = req->get_msg_id();
 
-	if (auto infer = dynamic_cast<msg_inference_req_rx*>(req)) {
-		auto request = new clientapi::InferenceRequest();
-		infer->get(*request);
-		api->infer(*request, [client, request, request_id] (clientapi::InferenceResponse &response) {
-			delete request;
-			auto rsp = new msg_inference_rsp_tx();
-			rsp->set(response);
-			rsp->set_msg_id(request_id);
-			client->msg_tx_.send_message(*rsp);
-		});
+	// if (auto infer = dynamic_cast<msg_inference_req_rx*>(req)) {
+	// 	auto request = new clientapi::InferenceRequest();
+	// 	infer->get(*request);
+	// 	api->infer(*request, [client, request, request_id] (clientapi::InferenceResponse &response) {
+	// 		delete request;
+	// 		auto rsp = new msg_inference_rsp_tx();
+	// 		rsp->set(response);
+	// 		rsp->set_msg_id(request_id);
+	// 		client->msg_tx_.send_message(*rsp);
+	// 	});
 
-	} else if (auto evict = dynamic_cast<msg_evict_req_rx*>(req)) {
-		auto request = new clientapi::EvictRequest();
-		evict->get(*request);
-		api->evict(*request, [client, request, request_id] (clientapi::EvictResponse &response) {
-			delete request;
-			auto rsp = new msg_evict_rsp_tx();
-			rsp->set(response);
-			rsp->set_msg_id(request_id);
-			client->msg_tx_.send_message(*rsp);
-		});
+	// } else if (auto evict = dynamic_cast<msg_evict_req_rx*>(req)) {
+	// 	auto request = new clientapi::EvictRequest();
+	// 	evict->get(*request);
+	// 	api->evict(*request, [client, request, request_id] (clientapi::EvictResponse &response) {
+	// 		delete request;
+	// 		auto rsp = new msg_evict_rsp_tx();
+	// 		rsp->set(response);
+	// 		rsp->set_msg_id(request_id);
+	// 		client->msg_tx_.send_message(*rsp);
+	// 	});
 
-	} else if (auto load_model = dynamic_cast<msg_load_remote_model_req_rx*>(req)) {
-		auto request = new clientapi::LoadModelFromRemoteDiskRequest();
-		load_model->get(*request);
-		api->loadRemoteModel(*request, [client, request, request_id] (clientapi::LoadModelFromRemoteDiskResponse &response) {
-			delete request;
-			auto rsp = new msg_load_remote_model_rsp_tx();
-			rsp->set(response);
-			rsp->set_msg_id(request_id);
-			client->msg_tx_.send_message(*rsp);
-		});
+	// } else if (auto load_model = dynamic_cast<msg_load_remote_model_req_rx*>(req)) {
+	// 	auto request = new clientapi::LoadModelFromRemoteDiskRequest();
+	// 	load_model->get(*request);
+	// 	api->loadRemoteModel(*request, [client, request, request_id] (clientapi::LoadModelFromRemoteDiskResponse &response) {
+	// 		delete request;
+	// 		auto rsp = new msg_load_remote_model_rsp_tx();
+	// 		rsp->set(response);
+	// 		rsp->set_msg_id(request_id);
+	// 		client->msg_tx_.send_message(*rsp);
+	// 	});
 		
-	} else if (auto upload_model = dynamic_cast<msg_upload_model_req_rx*>(req)) {
-		auto request = new clientapi::UploadModelRequest();
-		upload_model->get(*request);
-		api->uploadModel(*request, [client, request, request_id] (clientapi::UploadModelResponse &response) {
-			delete request;
-			auto rsp = new msg_upload_model_rsp_tx();
-			rsp->set(response);
-			rsp->set_msg_id(request_id);
-			client->msg_tx_.send_message(*rsp);
-		});
+	// } else if (auto upload_model = dynamic_cast<msg_upload_model_req_rx*>(req)) {
+	// 	auto request = new clientapi::UploadModelRequest();
+	// 	upload_model->get(*request);
+	// 	api->uploadModel(*request, [client, request, request_id] (clientapi::UploadModelResponse &response) {
+	// 		delete request;
+	// 		auto rsp = new msg_upload_model_rsp_tx();
+	// 		rsp->set(response);
+	// 		rsp->set_msg_id(request_id);
+	// 		client->msg_tx_.send_message(*rsp);
+	// 	});
 
-	} else if (auto ls = dynamic_cast<msg_ls_req_rx*>(req)) {
-		auto request = new clientapi::LSRequest();
-		ls->get(*request);
-		api->ls(*request, [client, request, request_id] (clientapi::LSResponse &response) {
-			delete request;
-			auto rsp = new msg_ls_rsp_tx();
-			rsp->set(response);
-			rsp->set_msg_id(request_id);
-			client->msg_tx_.send_message(*rsp);
-		});
+	// } else if (auto ls = dynamic_cast<msg_ls_req_rx*>(req)) {
+	// 	auto request = new clientapi::LSRequest();
+	// 	ls->get(*request);
+	// 	api->ls(*request, [client, request, request_id] (clientapi::LSResponse &response) {
+	// 		delete request;
+	// 		auto rsp = new msg_ls_rsp_tx();
+	// 		rsp->set(response);
+	// 		rsp->set_msg_id(request_id);
+	// 		client->msg_tx_.send_message(*rsp);
+	// 	});
 		
-	} else {
-		CHECK(false) << "Received an unsupported RPC request";
-	}
+	// } else {
+	// 	CHECK(false) << "Received an unsupported RPC request";
+	// }
 
-	delete req;
+	// delete req;
 }
 
 

@@ -175,6 +175,13 @@ void LoadingStage::Pending::result_received(std::shared_ptr<workerapi::Result> r
 	results.push_back(result);
 }
 
+/**
+ * Adds the result of loading a model from disk to the provided ClockworkState.
+ *
+ * @param state The ClockworkState to which the model information will be added.
+ * @param result The result of loading the model from disk.
+ *
+ */
 void LoadingStage::Pending::add_to_state(ClockworkState &state, std::shared_ptr<workerapi::LoadModelFromDiskResult> result) {
 	for (unsigned j = 0; j < result->copies_created; j++) {
 		BatchedModelState b;
@@ -205,6 +212,13 @@ void LoadingStage::Pending::check_results(std::shared_ptr<workerapi::LoadModelFr
 	CHECK(a->weights_size_in_cache == b->weights_size_in_cache) << "Inconsistent weights_size_in_cache in LoadModelFromDiskResult instances";
 }
 
+
+/**
+ * Checks if the results are complete, adds the result to the state, and sends the response to the client.
+ *
+ * @param state The ClockworkState to which the model information will be added.
+ *
+ */
 void LoadingStage::Pending::check_completion(ClockworkState &state) {
 	if (results.size() < actions.size()) return;
 
@@ -284,6 +298,17 @@ void LoadingStage::Worker::check() {
 	worker->sendActions(actions);
 }
 
+/**
+ * Constructs the LoadingStage by finding the model_id_seed (which is the highest model id),
+ * adds the workers connections to the LoadingStage::workers variable, then re-find the model_id_seed (?)
+ (but it looks like it's not really doing anything because the workers are not connected yet at this time...)
+ *
+ * @param state The ClockworkState object
+ * @param worker_connections A vector of WorkerConnection pointers representing the workers
+ * @param timeout The timeout value (nanoseconds) for the Loading Stage before transitioning to the Profiling stage
+ * @param max_batch_size The maximum batch size
+ * @param max_exec_duration The maximum execution duration
+ */
 LoadingStage::LoadingStage(
 	ClockworkState &state, 
 	std::vector<network::controller::WorkerConnection*> worker_connections,
@@ -293,7 +318,8 @@ LoadingStage::LoadingStage(
 	// Determine model_id_seed
 	for (auto &worker : state.workers) {
 		for (auto &p : worker.models) {
-			model_id_seed = std::max(model_id_seed, p.first+1);
+			std::cout << "Model id: " << p.first << "model_id_seed: " << model_id_seed << std::endl;
+			model_id_seed = std::max(model_id_seed, p.first+1); // model_id_seed is 0 by default
 		}
 	}
 
@@ -304,11 +330,18 @@ LoadingStage::LoadingStage(
 	// If the workers already have some models loaded, make sure we start from a higher ID
 	for (auto &worker : state.workers) {
 		for (auto &p : worker.models) {
+			std::cout << "Model id: " << p.first << "model_id_seed: " << model_id_seed << std::endl;
 			model_id_seed = std::max(p.first+1, model_id_seed);
 		}
 	}
 }
 
+/**
+ * Updates the model_id_seed and configures the load_model variable for each worker.
+ * Adds the load_model as an action to the Pending object and the worker, then inserts it in the actions variable.
+ *
+ * @param request The shared pointer to the LoadModelRequest object
+ */
 void LoadingStage::on_request(std::shared_ptr<LoadModelRequest> &request) {
 	int id = model_id_seed;
 	model_id_seed += request->request.no_of_copies;
@@ -331,6 +364,13 @@ void LoadingStage::on_request(std::shared_ptr<LoadModelRequest> &request) {
 	}
 }
 
+/**
+ * Handles the result received from a <PendingAction> in the 'actions' map.
+ *
+ * @param result A shared pointer to the workerapi::Result object.
+ *
+ * @throws std::runtime_error If the result is received for a non-existent action.
+ */
 void LoadingStage::on_result(std::shared_ptr<workerapi::Result> &result) {
 	auto it = actions.find(result->id);
 	CHECK(it != actions.end()) << "Received a result for a non-existent action " << result->str();
@@ -349,6 +389,16 @@ bool LoadingStage::is_loading_stage_complete() {
 		   (last_action + timeout) < util::now();
 }	
 
+/**
+ * Runs the loading stage of the controller after receiving requests from clients. 
+ * It sends requests to the worker using 'on_request' and receives results from workers using 'on_result'.
+ * Returns the state after processing all requests and results.
+ *
+ * @param load_model_request_queue The queue of load model requests
+ * @param worker_results_queue The queue of worker results
+ * 
+ * @return The state of the loading stage
+ */
 ClockworkState LoadingStage::run(tbb::concurrent_queue<std::shared_ptr<LoadModelRequest>> &load_model_request_queue,
 		 		   tbb::concurrent_queue<std::shared_ptr<workerapi::Result>> &worker_results_queue) {
 	uint64_t warn_at = 0;
@@ -418,6 +468,26 @@ void ControllerStartup::bounceLoadModelRequest(std::shared_ptr<LoadModelRequest>
 	request->callback(response);
 }
 
+/**
+* ControllerStartup handles steps of the Controller starting up before handing over to Scheduler. It does this by:
+* - Bouncing infer requests:
+*		During startup, infer requests will fail with clockworkInitializing.  To prevent spamming from clients,
+* 		requests will time out before returning clockworkInitializing.
+* - Getting the workers state (fetching info about currently-loaded models from workers)
+* - Connecting to the clients
+* - Loading models in the workers (requested by clients during an initial Loading stage)
+* - Profile models ?
+*		After a pre-configured period of inactivity, the Loading stage transitions to a Profiling stage to collect
+*    	initial statistics about models. Saves info about models in the clockwork state.
+* - Shutdown everything before transitioning to the scheduler and passing it the profiled model information (clockwork state)
+*
+* @param timeout The timeout value (nanoseconds) for the Loading Stage before transitioning to the Profiling stage.
+* @param workers A vector of WorkerConnection pointers representing the workers.
+*
+* @return The ClockworkState after the Startup is complete.
+*
+* @throws None
+*/
 ClockworkState ControllerStartup::run(uint64_t timeout, std::vector<network::controller::WorkerConnection*> workers) {
 	// Create a fetcher, call run directly, receive loaded model info
 	// Create a loader, call run directly, pass it loaded model info, receive loaded model info

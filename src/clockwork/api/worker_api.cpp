@@ -56,12 +56,18 @@ std::string EvictWeights::str() {
 
 std::string Infer::str() {
 	std::stringstream ss;
-	ss << "A" << id << ":Infer"
+	// ss << "A" << id << ":Infer"
+	//    << " model=" << model_id
+	//    << " gpu=" << gpu_id
+	//    << " batch=" << batch_size
+	//    << " input=" << input_size
+	//    << " " << window(earliest, latest);
+	ss << "Infer id=" << id
 	   << " model=" << model_id
 	   << " gpu=" << gpu_id
 	   << " batch=" << batch_size
 	   << " input=" << input_size
-	   << " " << window(earliest, latest);
+	   << " earliest, latest=" << window(earliest, latest);
 	return ss.str();
 }
 

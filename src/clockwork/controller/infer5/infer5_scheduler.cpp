@@ -1,4 +1,7 @@
 #include "clockwork/controller/infer5/infer5_scheduler.h"
+#include <grpcpp/impl/codegen/status.h>
+#include <iostream>
+#include <memory>
 #include <vector>
 
 namespace clockwork {
@@ -69,17 +72,19 @@ void Scheduler::RequestImpl::set_model(Model* model) {
 }
 
 void Scheduler::RequestImpl::set_slo(uint64_t default_slo) {
-    slo = default_slo;
+    slo = default_slo;  // default_slo = 100000000UL
     if (request.slo_factor > 0) {
         slo = model->b1_exec * request.slo_factor;
     }
-    response.deadline = request.arrival + slo;
+    response.deadline = request.arrival + slo; // arrival = 0 by default
 
-    exec_slo = std::min(slo, slo - Scheduler::buffer);
-    exec_slo = std::max(exec_slo, scheduler->schedule_ahead + Scheduler::buffer);
+    exec_slo = std::min(slo, slo - Scheduler::buffer);  // buffer = 5000000UL by default, so exec_slo = 95000000UL
+    exec_slo = std::max(exec_slo, scheduler->schedule_ahead + Scheduler::buffer); // scheduler_ahead = 10000000UL, sched + buffer = 15000000UL, so exec_slo = 95000000UL
     deadline = request.arrival + exec_slo;
 
-    weights_slo = std::min(max_loadweights_slo, std::min(slo, slo - (model->estimate_weights() + model->b1_exec + Scheduler::buffer + scheduler->schedule_ahead)));
+    weights_slo = std::min(max_loadweights_slo, 
+                           std::min(slo, 
+                                      slo - (model->estimate_weights() + model->b1_exec + Scheduler::buffer + scheduler->schedule_ahead)));
     weights_slo = std::max(weights_slo, scheduler->schedule_ahead + Scheduler::buffer);
 }
 
@@ -123,7 +128,7 @@ void Scheduler::RequestImpl::timeout() {
     response.departure = util::now();
     response.departure_count = model->copies_loaded;
 
-    callback(response);
+    //callback(response); // we ignored callback function for now
 
     model->tracker->cancelled(demand);
     model->invalidate_tracker();
@@ -206,32 +211,46 @@ void Scheduler::Model::pull_incoming_requests() {
     }
 }
 
+/**
+ * Pulls incoming requests and creates a strategy for each queue of request in 'queues'.
+ * The strategy sets the priority of a queue as 'deadline of the first request'  - 'estimate of execution'.
+ *
+ * @param gpu_id The ID of the GPU.
+ * @param gpu_clock The GPU clock.
+ * @param max_batchsize The maximum batch size.
+ * @return A vector of StrategyImpl objects representing the strategies.
+ */
 std::vector<Scheduler::StrategyImpl> Scheduler::Model::new_strategies(int gpu_id, unsigned gpu_clock, int max_batchsize) {
     tbb::queuing_mutex::scoped_lock lock(mutex);
 
-    pull_incoming_requests();
+    pull_incoming_requests();  // pull requests into 'queues'
 
     std::vector<StrategyImpl> strategies;
     for (int i = queues.size()-1; i >= 0; i--) {
         auto &queue = queues[i];
 
         if (queue->size() == 0) continue;
-        if (queue->batchsize > max_batchsize) continue;
+        if (queue->batchsize > max_batchsize) continue;  // drops requests that have too large batchsize
 
         StrategyImpl strategy;
         strategy.priority = queue->front()->deadline - estimate(queue->batchsize);
         strategy.batch_size = queue->batchsize;
         strategy.instance = instances[gpu_id];
         strategies.push_back(strategy);
-
-        // if (queues[i]->has_demand()) {
-        //     break;
-        // }
     }
 
     return strategies;
 }
 
+/**
+ * Attempt to dequeue requests from queues based on specified conditions.
+ *
+ * @param free_at the timestamp representing the current time
+ * @param gpu_clock the current clock speed of the GPU
+ * @param min_batchsize the minimum batch size requested
+ *
+ * @return a pointer to the dequeued InferAction object or nullptr if conditions are not met
+ */
 Scheduler::InferAction* Scheduler::Model::try_dequeue(
         uint64_t free_at,
         unsigned gpu_clock,
@@ -244,7 +263,7 @@ Scheduler::InferAction* Scheduler::Model::try_dequeue(
     // TODO: properly maintain requests_queued counter
     tbb::queuing_mutex::scoped_lock lock(mutex);
 
-    // Drain incoming requests to batchsize queues
+    // Drain incoming requests to batchsize queues (for now there are 4 batch queues for 1, 2, 4, 8)
     pull_incoming_requests();
 
     uint64_t size_before = queues[0]->size();
@@ -258,19 +277,26 @@ Scheduler::InferAction* Scheduler::Model::try_dequeue(
             queue->pop();
         }
     }
-
     // Find the appropriate queue
     int i = 0;
-    while (i < queues.size()-1 && queues[i+1]->has_demand()) {
+    while (i < queues.size()-1 && queues[i+1]->has_demand()) { // If size of queue is more or equal to batchsize, we have demand
         i++;
     }
 
     // Not enough requests available at the requested batchsize
     auto &queue = queues[i];
-    if (queue->batchsize < min_batchsize) return nullptr;
-    if (!queue->has_demand()) return nullptr;
+    //std::cout << "size before" << size_before << ", size of queue [" << i << "]: " << queue->size() << std::endl;
+    if (queue->batchsize < min_batchsize) {
+        //std::cout << "Not enough requests available, batchsize = " << queue->batchsize << ", min_batchsize = " << min_batchsize << std::endl;
+        return nullptr;
+    }
+    if (!queue->has_demand()) {
+        std::cout << "Queue has no demand" << std::endl;
+        return nullptr;
+    }
 
     // Create the action
+    std::cout << "Creating action for model " << this->id << ", batchsize = " << queue->batchsize << std::endl;
     uint64_t seqno;
     auto action = new InferAction(scheduler, this);
     for (unsigned i = 0; i < queue->batchsize; i++) {
@@ -292,6 +318,7 @@ Scheduler::InferAction* Scheduler::Model::try_dequeue(
 
     uint64_t size_after = queues[0]->size();
     requests_queued -= (size_before - size_after);
+    // std::cout << "size_after: " << size_after << ", requests_queued: " << requests_queued << std::endl;
 
     return action;
 }
@@ -320,6 +347,16 @@ uint64_t Scheduler::Model::estimate(unsigned batch_size) {
     return Scheduler::Model::estimate(batch_size, Scheduler::default_clock);
 }
 
+/**
+* Estimates the duration of a model execution for a given batch size and clock speed.
+*
+* @param batch_size the size of the input batch
+* @param clock the clock speed at which the execution will be performed
+*
+* @return the estimated duration of the model execution in nanoseconds
+*
+* @throws Non
+*/
 uint64_t Scheduler::Model::estimate(unsigned batch_size, int clock) {
     unsigned effective_batch_size = batch_lookup(batch_size);
     return estimates[effective_batch_size] / clock;
@@ -358,7 +395,7 @@ void Scheduler::InferAction::batch() {
             msg << "Network Status:  Client ✔✔✔✔✔ Controller ✔✔✔✔✔ Workers (inputs generated by client)";   
         }
         msg << std::endl;
-        std::cout << msg.str();
+        // std::cout << msg.str();
     }
 
     for (auto &req : requests) {
@@ -527,6 +564,50 @@ Scheduler::GPU::GPU(
       loadweights(Scheduler::default_clock, Scheduler::lag, Scheduler::future) {
 }
 
+void Scheduler::grpc_send_action(InferAction* action) {
+    uint64_t now = util::now();
+    if (action->send_by < now) {
+        std::cout << "Could not send action to worker in time, action->send_by: " << action->send_by << " now: " << now << "" << std::endl;
+        return;
+    }
+    // for now send batched requests separately, in the future batch them
+    for (std::shared_ptr<RequestImpl> req : action->requests) {
+        // Create tensor proto object
+        cluster_comm::Tensor input_tensor;
+        input_tensor.set_data(req->request.input, req->request.input_size);
+        *input_tensor.mutable_shape() = {req->request.input_shape.begin(), req->request.input_shape.end()};
+
+        // Populate proto request
+        cluster_comm::InferRequest infer_req;
+        infer_req.set_request_id(req->request.uuid);
+        infer_req.set_request_local_id(req->id);
+        infer_req.set_client_id(req->request.header.user_id);
+        infer_req.set_model_id(req->model->id);
+        infer_req.set_slo(req->slo);
+        *infer_req.mutable_input_tensor() = input_tensor;
+
+        grpc::ClientContext context;
+        grpc::CompletionQueue cq;
+        cluster_comm::Empty reply;
+
+        // Code for async send request (skip error check for now, implement in future)
+        // Note: I'm not sure this is 100% async, need to check
+        grpc::Status status;
+        std::unique_ptr<grpc::ClientAsyncResponseReader<cluster_comm::Empty>> rpc(
+            stub_->AsyncinferRequest(&context, infer_req, &cq));
+        rpc->Finish(&reply, &status, (void*)1);
+
+        // Code for synchronous send request
+        // grpc::Status status = stub_->inferRequest(&context, infer_req, &reply);
+        // if (status.ok()) {
+        //     std::cout << "status ok" << std::endl;
+        // } else {
+        //     std::cout << "RPC failed" << std::endl;
+        //     std::cout << "Status code " << status.error_code() << ": " << status.error_message() << "\n" << std::endl;
+        // }
+    }
+}
+
 void Scheduler::GPU::send_action(InferAction* action) {
     auto &infer = action->action;
     infer->gpu_id = gpu_id;
@@ -556,7 +637,11 @@ void Scheduler::GPU::send_action(InferAction* action) {
     action->model->invalidate_tracker();
 
     // Send the action
-    scheduler->network->send(worker, infer, action->send_by, action->report_error_at);
+    // use our own C++ gRPC function to send action instead of clockwork network function
+    scheduler->grpc_send_action(action);
+
+    // if action not sent by time "send_by", don't send and report error at time "report_error_at"
+    //scheduler->network->send(worker, infer, action->send_by, action->report_error_at);
 
     if (print_debug) std::cout << ("Worker <--  " + infer->str() + "\n");
 }
@@ -611,10 +696,19 @@ void Scheduler::GPU::send_action(EvictWeightsAction* action) {
     if (print_debug || print_loads) std::cout << ("Worker <--  " + evict->str() + "\n");    
 }
 
+/**
+ * Evicts pages from the GPU to make space for the required number of pages.
+ *
+ * @param required_pages The number of pages required.
+ *
+ * @return A vector of EvictWeightsAction pointers, representing the evicted weights actions.
+ *
+ * @throws None
+ */
 std::vector<Scheduler::EvictWeightsAction*> Scheduler::GPU::evict_pages(unsigned required_pages) {
     std::vector<EvictWeightsAction*> ret;
-    while (free_pages < required_pages) {
-        int model_id = scheduler->tracker->evictModel(id);
+    while (free_pages < required_pages) {  // keep evicting until we have enough pages
+        int model_id = scheduler->tracker->evictModel(id);  // model to evict, based on LRU
 
         if (model_id == -1) break;
 
@@ -634,18 +728,25 @@ std::vector<Scheduler::EvictWeightsAction*> Scheduler::GPU::evict_pages(unsigned
     return ret;
 }
 
+/**
+ * Schedules the loading of a model on the GPU.
+ *
+ * @return true if the model was successfully loaded, false otherwise.
+ *
+ * @throws None.
+ */
 bool Scheduler::GPU::schedule_load() {
     tbb::queuing_mutex::scoped_lock lock(load_mutex);
 
     uint64_t available;
     {
-        tbb::queuing_mutex::scoped_lock lock(loadweights_mutex);
-        available = loadweights.available();
+        tbb::queuing_mutex::scoped_lock lock(loadweights_mutex);  // 'loadweights' is a worker tracker
+        available = loadweights.available();  // returns the time outstanding work will complete (aka time gpu will be available)
     }
 
     uint64_t now = util::now();
-    if (available >= now + scheduler->schedule_ahead) return false;
-
+    if (available >= now + scheduler->schedule_ahead) return false;  // schedule_ahead = 10ms by default
+                                                                     // don't schedule if gpu isn't available 10ms from now
     ModelInstance* instance;
     unsigned size;
     std::vector<EvictWeightsAction*> evict_actions;
@@ -662,10 +763,10 @@ bool Scheduler::GPU::schedule_load() {
         CHECK(instance->loaded == false && instance->loading == false) << "Tracker asked to load model that is already loaded";
 
         size = scheduler->models[model_id]->num_weights_pages;
-        evict_actions = evict_pages(size);
+        evict_actions = evict_pages(size);  // prepare action to evict pages if necessary until we have enough pages
     }
 
-    if (free_pages < size) {
+    if (free_pages < size) {  // if size of model to load is too big for gpu
         instance->model->tracker->loadComplete(id, false);
         instance->model->invalidate_tracker();
     }
@@ -675,7 +776,7 @@ bool Scheduler::GPU::schedule_load() {
         send_action(evict);
     }
 
-    if (free_pages < size) {
+    if (free_pages < size) { // if size of model to load is too big for gpu
         return false;
     }
 
@@ -693,12 +794,23 @@ bool Scheduler::GPU::schedule_load() {
     return true;
 }
 
+/**
+ * Adds strategies for a single ModelInstance.
+ * (stragety = setting priority of which job to do first)
+ *
+ * @param instance The ModelInstance for which to add strategies.
+ * @param max_batchsize The maximum batch size.
+ *
+ * @return void
+ *
+ * @throws None
+ */
 void Scheduler::GPU::add_model_strategies(ModelInstance* instance, int max_batchsize) {
     instance->strategies = instance->model->new_strategies(id, exec.clock(), max_batchsize);
     if (instance->strategies.size() == 0) {
         // Strategy should be deactivated
         // There is an unimportant race condition here if requests are concurrently enqueued
-        instance->deactivate();
+        instance->deactivate(); // set 'active' flag to false
         return;
     }
 
@@ -707,6 +819,13 @@ void Scheduler::GPU::add_model_strategies(ModelInstance* instance, int max_batch
     }
 }
 
+/**
+* Schedules inference for a single GPU, by adding strategies for all activated model instances
+*
+* @return true if inference was scheduled, false otherwise
+*
+* @throws None
+*/
 bool Scheduler::GPU::schedule_infer() {
     // TODO: skip and deactivate models that have been evicted
     // TODO: what to do when we run out of reqs
@@ -716,11 +835,11 @@ bool Scheduler::GPU::schedule_infer() {
     // All activated instances start dirty
     std::vector<ModelInstance*> newly_activated;
     ModelInstance* activated_model;
+    // Pops all activated model instances into newly_activated
     while (activated.try_pop(activated_model)) {
         newly_activated.push_back(activated_model);
     }
-
-    // Get and incorporate strategies for activated instances
+    // Get and incorporate strategies for each activated instance
     for (auto &instance : newly_activated) {
         add_model_strategies(instance);
     }
@@ -732,50 +851,57 @@ bool Scheduler::GPU::schedule_infer() {
     // If model is empty, set active to false, then drain queue just in case
     bool active = false;
     while (strategies.size() > 0) {
+        //std::cout << strategies.size() << " strategies scheduled for: " << newly_activated.size() << " newly activated models" << "\n";
         uint64_t exec_at;
         int clock;
         {
             tbb::queuing_mutex::scoped_lock lock(exec_mutex);
-            exec_at = exec.available();
-            clock = exec.clock();
+            exec_at = exec.available();  // exec_at = time outstanding work will complete (aka time that gpu will be available)
+            clock = exec.clock();  // clock of worker
         }
 
-        uint64_t schedule_until = util::now() + scheduler->schedule_ahead;
-        if (exec_at >= schedule_until) {
+        // schedule_until = how far we want to schedule until (in the future)
+        uint64_t schedule_until = util::now() + scheduler->schedule_ahead; // schedule_ahead is 10ms by default
+        if (exec_at >= schedule_until) {  // If time to schedule is to far in the future, don't schedule yet, keep looping
+            std::cout << "Not scheduling yet, exec_at: " << exec_at << ", schedule_until: " << schedule_until << "\n";
             schedule_infer_exec_full++;
             break;
         }
 
-        auto strategy = *strategies.begin();
-        auto instance = strategy.instance;
+        auto strategy = *strategies.begin();  // Get the first strategy, strategies are a set sorted by priority,
+        auto instance = strategy.instance; // then batch size, then model id
 
-        // Remove all strategies for this instance
-        int expected = instance->strategies.size();
-        int before = strategies.size();
+        // Remove all strategies for this instance (from instance and from gpu)
+        int expected = instance->strategies.size();  // instance strategies
+        int before = strategies.size();  // gpu strategies
         for (auto &strategy : instance->strategies) {
-            auto it = strategies.find(strategy);
+            auto it = strategies.find(strategy);  // find the gpu strategy that corresponds to the instance strategy
             CHECK(it != strategies.end()) << "Strategy missing from priority queue";
-            strategies.erase(it);
+            strategies.erase(it);  // remove that strategy from gpu strategies
         }
-        instance->strategies.clear();
+        instance->strategies.clear();  // remove all instance strategies
         int after = strategies.size();
 
         // Deactivate evicted model
-        if (!strategy.instance->loaded) {
+        if (!strategy.instance->loaded) {  // If model instance is not loaded, that means it has been evicted
+            std::cout << "Model not loaded: " << strategy.instance->model->id << "\n";
             strategy.instance->deactivate();
             continue;
         }
 
+        // Attempt to dequeue requests from queues that will finish in time and can be batched
         InferAction* action = strategy.instance->model->try_dequeue(exec_at, clock, strategy.batch_size);
 
         schedule_infer_action_attempted++;
         if (action != nullptr) {
+            std::cout << "Sending action: " << action->action->str() << " to worker " << worker_id << "\n";
             schedule_infer_action_created++;
             send_action(action);
             active = true;
             add_model_strategies(strategy.instance);
             break;
         } else {
+            //std::cout << "Action not created, instead create new strategies with smaller batch_size: " << strategy.batch_size-1 << "\n";
             add_model_strategies(strategy.instance, strategy.batch_size-1);
         }
     }
@@ -786,7 +912,7 @@ bool Scheduler::GPU::schedule_infer() {
         schedule_infer_inactive_count++;
     }
 
-    return active;
+    return active;  // we don't really use this variable...
 }
 
 void Scheduler::GPU::infer_error(InferAction* action, std::shared_ptr<workerapi::ErrorResult> &error) {
@@ -947,13 +1073,14 @@ void Scheduler::GPU::evict_result(EvictWeightsAction* action, std::shared_ptr<wo
 
 void Scheduler::validate_clockwork_state(ClockworkState &state) {
     unsigned cache_size = state.workers[0].gpus[0].weights_cache_total_pages;
+    std::cout << "----------------Checking if all GPUs have same cache_size: " << cache_size << std::endl;
     for (auto &worker : state.workers) {
         for (auto &gpu : worker.gpus) {
             CHECK(gpu.weights_cache_total_pages == cache_size) 
                 << "Expect same cache size on all GPUs";
         }
     }
-
+    std::cout << "----------------Checking if all workers have the same models in RAM" << std::endl;
     for (auto &p : state.workers[0].models) {
         unsigned model_id = p.first;
         for (auto &worker : state.workers) {
@@ -989,7 +1116,7 @@ void Scheduler::initialize_models(ClockworkState &state) {
             models.resize(model.id+1, nullptr);
         }
 
-        models[model.id] = new Model(this, model);
+        models[model.id] = new Model(this, model);  // this also creates model queues
     }
 
     std::cout << "Created " << models.size() << " models" << std::endl;
@@ -1024,6 +1151,8 @@ void Scheduler::initialize_gpus(std::vector<network::controller::WorkerConnectio
 }
 
 void Scheduler::initialize_model_instances() {
+    std::cout << "----------------workflow: src/clockwork/controller/infer5/infer5_scheduler.cpp: Scheduler::initialize_model_instances" << std::endl;
+    std::cout << "----------------This creates/initializes <ModelInstance>instances for each combination of model/GPU" << std::endl;
     for (auto &gpu : gpus) {
         gpu->instances.resize(models.size(), nullptr);
     }
@@ -1036,6 +1165,7 @@ void Scheduler::initialize_model_instances() {
         for (unsigned j = 0; j < models.size(); j++) {
             Model* model = models[j];
             ModelInstance* instance = new ModelInstance(gpu, model);
+            instance->loaded = true;
             model->instances[i] = instance;
             gpu->instances[j] = instance;
         }
@@ -1106,6 +1236,8 @@ void Scheduler::run_gpu_stats_printer_thread() {
 }
 
 void Scheduler::initialize_network(std::vector<network::controller::WorkerConnection*> workers) {
+    std::cout << "----------------workflow: src/clockwork/controller/infer5/infer5_scheduler.cpp: Scheduler::initialize_network" << std::endl;
+    std::cout << "----------------This initializes the network executor" << std::endl;
     auto transmitComplete = [this]() {
         this->network->sendComplete();
     };
@@ -1120,7 +1252,19 @@ void Scheduler::initialize_network(std::vector<network::controller::WorkerConnec
     }
 }
 
-
+/**
+ * @brief Called when model loading has completed
+ * 
+ * This function performs several tasks after model loading has completed. It validates the workers' state,
+ * creates/initializes models on workers, initializes GPUs, model instances, and the network.
+ * It then creates and starts various threads for different tasks like printing stats, processing requests,
+ * handling trackers, processing results, running inference, and loading data.
+ *
+ * @param workers A vector of worker connections
+ * @param state The clockwork state
+ *
+ * @throws None
+ */
 // Called when model loading has completed
 void Scheduler::start(std::vector<network::controller::WorkerConnection*> workers,
                     ClockworkState &state) 
@@ -1132,32 +1276,32 @@ void Scheduler::start(std::vector<network::controller::WorkerConnection*> worker
     initialize_network(workers);
 
     print_status();
-
+    
     // Create and start the printer threads
     this->printer = ControllerActionTelemetry::log_and_summarize(actions_filename, print_interval);
-    network_printer = std::thread(&networkPrintThread, workers);
+    network_printer = std::thread(&networkPrintThread, workers);  // Print network stats
     threading::initLoggerThread(network_printer);
 
-    if (print_scheduler_stats) {
+    if (print_scheduler_stats) {  // false by default
         this->stats_printer = std::thread(&Scheduler::run_gpu_stats_printer_thread, this);
-        threading::initLoggerThread(stats_printer);
+        threading::initLoggerThread(stats_printer);  // Print GPU stats
     }
 
     uint64_t num_admission_threads = 2; // 2
     for (int i = 0; i < num_admission_threads; i++) {
         admission_threads.push_back(std::thread(&Scheduler::run_admission_thread, this));
-        threading::initHighPriorityThread(admission_threads[i]);
+        threading::initHighPriorityThread(admission_threads[i]);  // Process/handle requests, adding them to the model queues, dropping ones that timed out
     }
 
     uint64_t num_tracker_threads = 1;
     for (int i = 0; i < num_tracker_threads; i++) {
-        tracker_threads.push_back(std::thread(&Scheduler::run_tracker_thread, this));
+        tracker_threads.push_back(std::thread(&Scheduler::run_tracker_thread, this));  // Processes the trackers of all the 'stale' models
         threading::initHighPriorityThread(tracker_threads[i]);
     }
 
     uint64_t num_results_threads = 2; // 2
     for (int i = 0; i < num_results_threads; i++) {
-        results_threads.push_back(std::thread(&Scheduler::run_results_thread, this));
+        results_threads.push_back(std::thread(&Scheduler::run_results_thread, this));  // Processes the results from the result_queue
         threading::initHighPriorityThread(results_threads[i]);
     }
 
@@ -1187,15 +1331,22 @@ struct tracker_request {
     uint64_t start_loadweights_by;
 };
 
+/**
+ * Handles a request by setting up its model, Service Level Objective (SLO), demand (execution/load time), and submits the request to the queue for the model.
+ *
+ * @param request The request object containing model information
+ *
+ * @throws None
+ */
 void Scheduler::handle_request(Request &request) {
     int model_id = request->request.model_id;
     Model* model = models[model_id];
-
     request->set_model(model);
-    request->set_slo(default_slo);
+    // request->set_slo(default_slo);
+    request->set_slo(request->request.slo);
 
-    request->demand = model->tracker->addRequest(
-        model->estimate(1), request->exec_slo, request->weights_slo);
+    // request->demand = model->tracker->addRequest(  // Calculate the demand for the request
+    //     model->estimate(1), request->exec_slo, request->weights_slo);
     model->invalidate_tracker();
     request->model->enqueue(request);
 }
@@ -1207,6 +1358,13 @@ void Scheduler::add_callback(uint64_t action_id, Callback callback) {
     callbacks.insert(pair);
 }
 
+/**
+* Handles the result of a worker action by calling its corresponding callback.
+*
+* @param result A shared pointer to the worker action result.
+*
+* @throws None
+*/
 void Scheduler::handle_result(std::shared_ptr<workerapi::Result> &result) {
     Callback callback;
     {
@@ -1223,6 +1381,16 @@ void Scheduler::handle_result(std::shared_ptr<workerapi::Result> &result) {
     callback(result);
 }
 
+/**
+ * Runs the admission thread of the Scheduler.
+ *
+ * This function continuously pops requests from the request queue and handles them.
+ * It also drops requests that have timed out.
+ *
+ * @return void
+ *
+ * @throws None
+ */
 void Scheduler::run_admission_thread() {
     // Process this many requests per iteration
     int max_requests = 50;
@@ -1244,7 +1412,7 @@ void Scheduler::run_admission_thread() {
                 request->set_error(clockworkError, "Invalid model ID");
                 CHECK(!request->complete(util::now(), -1)) << "Erroneous request should not be successful";
             } else {
-                handle_request(request);
+                handle_request(request);  // Handles the request
                 timeout_queue.push(request);
             }
             active = true;
@@ -1271,6 +1439,14 @@ void Scheduler::run_admission_thread() {
     }
 }
 
+/**
+ * Runs the results thread.
+ *
+ * This function continuously pops a result from the result queue and handles it.
+ * It also checks for timed out results and handles them.
+ *
+ * @throws None
+ */
 void Scheduler::run_results_thread() {
     bool should_timeout = false;
     TimeoutResult next_timeout;
@@ -1334,7 +1510,14 @@ void Scheduler::run_load_thread(int id) {
     }
 
 }
-
+/**
+ * This function runs the tracker thread. It processes models by popping them from 'stale' into a vector of 'models',
+ * processes the tracker of each model in 'models', and then resets the tracker. 
+ *
+ * @return void
+ *
+ * @throws None
+ */
 void Scheduler::run_tracker_thread() {
     std::cout << "Tracker thread running\n";
     std::vector<Model*> models;

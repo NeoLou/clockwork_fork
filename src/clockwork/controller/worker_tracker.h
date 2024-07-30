@@ -2,6 +2,7 @@
 #define _CLOCKWORK_CONTROLLER_WORKER_TRACKER_H_
 
 #include <queue>
+#include <iostream>
 #include "clockwork/util.h"
 
 
@@ -42,12 +43,13 @@ public:
 
 	// Returns the time outstanding work will complete
 	uint64_t available() {
-		uint64_t now = util::now();
+		uint64_t now = clockwork::util::now();
 		uint64_t work_begin = this->work_begin;
 		if (outstanding.size() > 0 && (work_begin + (outstanding.front().size / clock_) + lag < now)) {
 			// Outstanding work has mysteriously not completed
 			work_begin = now - lag - outstanding.front().size / clock_;
 		}
+		std::cout << "work_begin: " << work_begin << ", total_outstanding / clock_: " << total_outstanding / clock_ << ", now: " << now << std::endl;
 		return std::max(work_begin + total_outstanding / clock_, now + future);
 	}
 

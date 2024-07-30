@@ -144,22 +144,22 @@ unsigned coreCount() {
 }
 
 void setCore(unsigned core) {
-	cpu_set_t cpuset;
-	CPU_ZERO(&cpuset);
-	CPU_SET(core, &cpuset);
-	int rc = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
-	CHECK(rc == 0) << "Unable to set thread affinity: " << rc;
+	// cpu_set_t cpuset;
+	// CPU_ZERO(&cpuset);
+	// CPU_SET(core, &cpuset);
+	// int rc = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+	// CHECK(rc == 0) << "Unable to set thread affinity: " << rc;
 }
 
 void setCores(std::vector<unsigned> cores, pthread_t thread) {
-	CHECK(cores.size() > 0) << "Trying to bind to empty core set";
-	cpu_set_t cpuset;
-	CPU_ZERO(&cpuset);
-	for (unsigned core : cores) {
-		CPU_SET(core, &cpuset);
-	}
-	int rc = pthread_setaffinity_np(thread, sizeof(cpu_set_t), &cpuset);
-	CHECK(rc == 0) << "Unable to set thread affinity: " << rc;
+	// CHECK(cores.size() > 0) << "Trying to bind to empty core set";
+	// cpu_set_t cpuset;
+	// CPU_ZERO(&cpuset);
+	// for (unsigned core : cores) {
+	// 	CPU_SET(core, &cpuset);
+	// }
+	// int rc = pthread_setaffinity_np(thread, sizeof(cpu_set_t), &cpuset);
+	// CHECK(rc == 0) << "Unable to set thread affinity: " << rc;
 }
 
 void setAllCores() {
@@ -261,15 +261,15 @@ void setMaxPriority() {
 }
 
 void setPriority(int scheduler, int priority, pthread_t thId) {
-	struct sched_param params;
-	params.sched_priority = sched_get_priority_max(scheduler);
-	int ret = pthread_setschedparam(thId, scheduler, &params);
-	CHECK(ret == 0) << "Unable to set thread priority.  Don't forget to set `rtprio` to unlimited in `limits.conf`.  See Clockwork README for instructions";
+	// struct sched_param params;
+	// params.sched_priority = sched_get_priority_max(scheduler);
+	// int ret = pthread_setschedparam(thId, scheduler, &params);
+	// CHECK(ret == 0) << "Unable to set thread priority.  Don't forget to set `rtprio` to unlimited in `limits.conf`.  See Clockwork README for instructions";
 
-	int policy = 0;
-	ret = pthread_getschedparam(thId, &policy, &params);
-	CHECK(ret == 0) << "Unable to verify thread scheduler params";
-	CHECK(policy == scheduler) << "Unable to verify thread scheduler params";
+	// int policy = 0;
+	// ret = pthread_getschedparam(thId, &policy, &params);
+	// CHECK(ret == 0) << "Unable to verify thread scheduler params";
+	// CHECK(policy == scheduler) << "Unable to verify thread scheduler params";
 }
 
 int currentScheduler() {

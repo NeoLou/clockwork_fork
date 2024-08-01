@@ -1,4 +1,5 @@
 #include "clockwork/controller/infer5/infer5_scheduler.h"
+#include "cluster_comm.pb.h"
 #include <grpcpp/impl/codegen/status.h>
 #include <iostream>
 #include <memory>
@@ -564,13 +565,16 @@ Scheduler::GPU::GPU(
       loadweights(Scheduler::default_clock, Scheduler::lag, Scheduler::future) {
 }
 
-void Scheduler::grpc_send_action(InferAction* action) {
+void Scheduler::GPU::grpc_send_action(InferAction* action) {
     uint64_t now = util::now();
     if (action->send_by < now) {
         std::cout << "Could not send action to worker in time, action->send_by: " << action->send_by << " now: " << now << "" << std::endl;
         return;
     }
-    // for now send batched requests separately, in the future batch them
+    cluster_comm::BatchedInferRequest batched_infer_req;
+    batched_infer_req.set_id(action->action->id);
+    std::vector<cluster_comm::InferRequest> infer_reqs;
+
     for (std::shared_ptr<RequestImpl> req : action->requests) {
         // Create tensor proto object
         cluster_comm::Tensor input_tensor;
@@ -586,26 +590,35 @@ void Scheduler::grpc_send_action(InferAction* action) {
         infer_req.set_slo(req->slo);
         *infer_req.mutable_input_tensor() = input_tensor;
 
-        grpc::ClientContext context;
-        grpc::CompletionQueue cq;
-        cluster_comm::Empty reply;
-
-        // Code for async send request (skip error check for now, implement in future)
-        // Note: I'm not sure this is 100% async, need to check
-        grpc::Status status;
-        std::unique_ptr<grpc::ClientAsyncResponseReader<cluster_comm::Empty>> rpc(
-            stub_->AsyncinferRequest(&context, infer_req, &cq));
-        rpc->Finish(&reply, &status, (void*)1);
-
-        // Code for synchronous send request
-        // grpc::Status status = stub_->inferRequest(&context, infer_req, &reply);
-        // if (status.ok()) {
-        //     std::cout << "status ok" << std::endl;
-        // } else {
-        //     std::cout << "RPC failed" << std::endl;
-        //     std::cout << "Status code " << status.error_code() << ": " << status.error_message() << "\n" << std::endl;
-        // }
+        infer_reqs.push_back(infer_req);
     }
+    *batched_infer_req.mutable_batched_requests() = {infer_reqs.begin(), infer_reqs.end()};
+    
+    grpc::ClientContext context;
+    grpc::CompletionQueue cq;
+    cluster_comm::Empty reply;
+
+    // Code for async send request (skip error check for now, implement in future)
+    // Note: I'm not sure this is 100% async, need to check
+    grpc::Status status;
+    std::unique_ptr<grpc::ClientAsyncResponseReader<cluster_comm::Empty>> rpc(
+        stub_->AsyncsendBatchInferReq(&context, batched_infer_req, &cq));
+    rpc->Finish(&reply, &status, (void*)1);
+
+    // // Error check
+    // void* got_tag;
+    // bool ok = false;
+    // CHECK(cq.Next(&got_tag, &ok));
+    // CHECK_EQ(got_tag, (void*)1);
+    // CHECK(ok);
+    // if (status.ok()) {
+    //   std::cout << "RPC successful" << std::endl;
+    // } else {
+    //   std::cout << "RPC failed" << std::endl;
+    //   std::cout << status.error_code() << ": " << status.error_message()
+    //             << std::endl;
+    // }
+    std::cout << "Action sent successfully" << std::endl;
 }
 
 void Scheduler::GPU::send_action(InferAction* action) {
@@ -638,10 +651,10 @@ void Scheduler::GPU::send_action(InferAction* action) {
 
     // Send the action
     // use our own C++ gRPC function to send action instead of clockwork network function
-    scheduler->grpc_send_action(action);
+    this->grpc_send_action(action);
 
     // if action not sent by time "send_by", don't send and report error at time "report_error_at"
-    //scheduler->network->send(worker, infer, action->send_by, action->report_error_at);
+    // scheduler->network->send(worker, infer, action->send_by, action->report_error_at);
 
     if (print_debug) std::cout << ("Worker <--  " + infer->str() + "\n");
 }

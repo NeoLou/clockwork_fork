@@ -360,6 +360,10 @@ class Scheduler : public clockwork::Scheduler {
 
         tbb::concurrent_queue<ModelInstance*> activated;
 
+        // Connection to Orion node controller
+        std::shared_ptr<grpc::Channel> channel_;
+        std::unique_ptr<cluster_comm::NodeController::Stub> stub_;
+
         std::atomic_uint64_t schedule_infer_count = 0;
         std::atomic_uint64_t schedule_infer_active_count = 0;
         std::atomic_uint64_t schedule_infer_inactive_count = 0;
@@ -414,6 +418,9 @@ class Scheduler : public clockwork::Scheduler {
         void send_action(InferAction* action);
         void send_action(LoadWeightsAction* action);
         void send_action(EvictWeightsAction* action);
+
+        // Sending actions to Orion workers through gRPC
+        void grpc_send_action(InferAction* action);
 
         void add_model_strategies(ModelInstance* instance, int max_batchsize=INT_MAX);
 
@@ -491,10 +498,6 @@ class Scheduler : public clockwork::Scheduler {
     // Network executor
     NetworkExecutor* network = nullptr;
 
-    // Connection to Orion node controller
-    std::shared_ptr<grpc::Channel> channel_;
-    std::unique_ptr<cluster_comm::NodeController::Stub> stub_;
-
     // Messages
     struct TimeoutResult {
         uint64_t timeout_at;
@@ -532,9 +535,6 @@ class Scheduler : public clockwork::Scheduler {
 
     // The actual scheduler interface implementation, invoked by worker network thread
     virtual void resultFromWorker(std::shared_ptr<workerapi::Result> result);
-
-    // Sending actions to Orion workers through gRPC
-    void grpc_send_action(InferAction* action);
 
  //private:
 

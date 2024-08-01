@@ -1,11 +1,5 @@
-#include "clockwork/client.h"
-#include "clockwork/controller/controller.h"
 #include "clockwork/controller/infer5/infer5_scheduler.h"
 #include "clockwork/controller/scheduler.h"
-#include "clockwork/network/worker.h"
-#include "clockwork/thread.h"
-#include "clockwork/workload/example.h"
-#include "clockwork/workload/workload.h"
 #include <python3.7m/Python.h>
 #include <python3.7m/object.h>
 #include <vector>
@@ -105,7 +99,7 @@ extern "C" {
         return scheduler;
     }
 
-    void startScheduler(SCHED_T *scheduler, PyObject *model_node_dict, PyObject *gpus_dict, PyObject *model_placements_list) {
+    void startScheduler(SCHED_T *scheduler, PyObject *model_node_dict, PyObject *gpus_dict, PyObject *model_placements_list, int max_message_length) {
         // C++ type definitions
         /*
         struct ClockworkState {
@@ -251,16 +245,23 @@ extern "C" {
         scheduler->initialize_gpus(workers, state);
         scheduler->initialize_model_instances();  // modified to mark model instances as "loaded" on creation
         //scheduler->initialize_network(workers);
-        std::cout << "Connect to Orion node controller" << std::endl;
-        // Create channel and stub to connect to grpc server
-        scheduler->channel_ = grpc::CreateChannel("localhost:50051", grpc::InsecureChannelCredentials());
-        scheduler->stub_ = cluster_comm::NodeController::NewStub(scheduler->channel_);
+        
+        // Create grpc channel and stub for each gpu
+        std::cout << "Create gRPC channel and stub for each of the " << scheduler->gpus.size() << " GPUs" << std::endl;
+        grpc::ChannelArguments args;
+        args.SetMaxReceiveMessageSize(max_message_length);
+        args.SetMaxSendMessageSize(max_message_length);
+        for (int i = 0; i < scheduler->gpus.size(); i++) {
+            auto cur_gpu = scheduler->gpus[i];
+            cur_gpu->channel_ = grpc::CreateCustomChannel("localhost:50051", grpc::InsecureChannelCredentials(), args);
+            cur_gpu->stub_ = cluster_comm::NodeController::NewStub(cur_gpu->channel_);
+        }
         std::cout << "Final Clockwork State: " << state.str() << std::endl;
         std::cout << "Finished starting Clockwork Scheduler" << std::endl;
     }
 
-     void insertOrionReqInClockworkScheduler(SCHED_T *scheduler, char *req_uuid, int req_local_id,int client_id, int model_id, int slo,
-                                             char *tensor_bytes, int tensor_bytes_size, int *tensor_shape, int tensor_shape_size) {
+     void insertOrionRequestInClockwork(SCHED_T *scheduler, char *req_uuid, int req_local_id,int client_id, int model_id, int slo,
+                                        char *tensor_bytes, int tensor_bytes_size, int *tensor_shape, int tensor_shape_size) {
         /*
         ------------------------------- Request data format -------------------------------
         struct InferenceRequest {
@@ -306,6 +307,59 @@ extern "C" {
         scheduler->clientInfer(*request, callback);
     }
 
+    void insertOrionResultInClockwork(SCHED_T *scheduler, char *req_uuid) {
+        /*
+        ------------------------------- Result data format -------------------------------
+        tbb::concurrent_queue<std::shared_ptr<workerapi::Result>> result_queue;
+        class Result {
+            public:
+                int id;
+                int action_type;
+                int status;
+
+                uint64_t action_received;
+                uint64_t result_sent;
+
+                // Not sent over the network
+                uint64_t result_received = 0;
+                int64_t clock_delta = 0; // Estimated clock delta between controller and this worker
+                
+                virtual std::string str() = 0;
+        };
+        class InferResult : public Result {
+            public:
+                Timing copy_input;
+                Timing exec;
+                Timing copy_output;
+                int output_size;
+                char* output;
+                unsigned gpu_id;
+                unsigned gpu_clock_before;
+                unsigned gpu_clock;
+                
+                virtual std::string str();
+        };
+        */
+
+        // Create InferenceRequest
+        auto result = new workerapi::InferResult();
+	    // result->id = client_id;
+	    // request->header.user_request_id = req_local_id;
+        // request->uuid = std::string(req_uuid);
+	    // request->model_id = model_id;
+	    // request->batch_size = 1;
+        // request->slo_factor = 0;
+        // request->input = new_tensor_bytes;
+	    // request->input_size = tensor_bytes_size;
+        // request->input_shape = tensor_shape_vec;
+        // request->slo = slo;
+        // if (request->arrival == 0) {
+		//     request->arrival = util::now();
+	    // }
+        // std::function<void (clientapi::InferenceResponse &)> callback; // create blank callback
+        // scheduler->clientInfer(*request, callback);
+    }
+
     bool isClockworkReqQueueEmpty(SCHED_T *scheduler) {
         bool is_empty = scheduler->request_queue.empty();
         return is_empty;
@@ -315,6 +369,7 @@ extern "C" {
         return new AdmissionThreadMemory();
     }
 
+    // Clockwork runs 2 admission threads
     AdmissionThreadMemory *runAdmissionThread(SCHED_T *scheduler, AdmissionThreadMemory *admission_thread_memory) {
 
         // Process this many requests per iteration
@@ -371,64 +426,22 @@ extern "C" {
         return admission_thread_memory;
     }
 
-    // bool isInferActionQueueEmpty(SCHED_T *scheduler) {
-    //     bool is_empty = scheduler->infer_action_queue.empty();
-    //     return is_empty;
-    // }
-
-    // PyObject *getInferAction(SCHED_T *scheduler) {
-    //     /*
-    //     class InferAction {
-    //         Model* model;
-    //         ControllerActionTelemetry telemetry;
-    //         std::shared_ptr<workerapi::Infer> action = std::make_shared<workerapi::Infer>();
-    //         std::shared_ptr<workerapi::ErrorResult> error = nullptr;
-    //         std::shared_ptr<workerapi::InferResult> result = nullptr;
-    //         std::vector<Request> requests;
-    //         uint64_t send_by;
-    //         uint64_t report_error_at;
-    //     }
-    //     */
-    //     PyObject *infer_action_dict = PyDict_New();
-    //     SCHED_T::InferAction *infer_action;
-    //     std::vector<std::pair<int, int>> req_id_and_user_id_tuple_arr;
-    //     if (scheduler->infer_action_queue.try_pop(infer_action)) {
-    //         for (auto &request : infer_action->requests) {
-    //             req_id_and_user_id_tuple_arr.push_back(std::pair(request->request.header.user_request_id, request->request.header.user_id));
-    //         }
-    //         PyDict_SetItem(infer_action_dict, PyUnicode_FromString("model_id"), PyLong_FromLong(infer_action->model->id));
-    //         PyDict_SetItem(infer_action_dict, PyUnicode_FromString("gpu_id"), PyLong_FromLong(infer_action->action->gpu_id));
-    //         PyDict_SetItem(infer_action_dict, PyUnicode_FromString("worker_id"), PyLong_FromLong(infer_action->action->worker_id));
-    //         PyDict_SetItem(infer_action_dict, PyUnicode_FromString("send_by"), PyLong_FromLong(infer_action->send_by));
-    //         PyDict_SetItem(infer_action_dict, PyUnicode_FromString("req_id_and_user_id_tuple_arr"), PyList_New(req_id_and_user_id_tuple_arr.size()));
-    //         for (int i = 0; i < req_id_and_user_id_tuple_arr.size(); i++) {
-    //             PyObject * req_id_and_user_id_tuple = PyTuple_New(2);
-    //             PyTuple_SetItem(req_id_and_user_id_tuple, 0, PyLong_FromLong(req_id_and_user_id_tuple_arr[i].first));
-    //             PyTuple_SetItem(req_id_and_user_id_tuple, 1, PyLong_FromLong(req_id_and_user_id_tuple_arr[i].second));
-    //             PyList_SetItem(infer_action_dict, i, req_id_and_user_id_tuple);
-    //         }
-    //     }
-    //     else {
-    //         std::cout << "Infer action queue empty" << std::endl;
-    //     }
-    //     return infer_action_dict;
-    // }
-
+    // Clockwork runs 5 infer threads
     void runInferThread(SCHED_T *scheduler) {
         // std::stringstream msg;
         // msg << "GPU infer thread [" << id << "] started" << std::endl;
         // std::cout << msg.str();
 
         // int i = 0;
-        // int n_gpus = scheduler->gpus.size();
+        int n_gpus = scheduler->gpus.size();
 
         // while (true) {
-        int n_gpus = 1; // hard code
         uint64_t i = (scheduler->next_infer++) % n_gpus;
         bool active = scheduler->gpus[i]->schedule_infer();
         // }
     }
 
+    // Clockwork runs 1 tracker threads
     void runTrackerThread(SCHED_T *scheduler) {
         // std::cout << "Tracker thread running\n";
         std::vector<SCHED_T::Model*> models;
@@ -454,6 +467,7 @@ extern "C" {
         // }
     }
 
+    // Clockwork runs 2 results threads
     void runResultsThread(SCHED_T *scheduler) {
         std::cout << "Result thread running\n";
         bool should_timeout = false;
@@ -490,6 +504,7 @@ extern "C" {
         }
     }
 
+    // Clockwork runs 5 load threads
     void runLoadThread(SCHED_T *scheduler, int id) {
         std::stringstream msg;
         msg << "GPU load thread [" << id << "] started" << std::endl;

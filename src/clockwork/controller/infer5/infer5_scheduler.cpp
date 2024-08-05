@@ -3,6 +3,7 @@
 #include <grpcpp/impl/codegen/status.h>
 #include <iostream>
 #include <memory>
+#include <unistd.h>
 #include <vector>
 
 namespace clockwork {
@@ -26,7 +27,7 @@ Scheduler::Scheduler(uint64_t default_slo, uint64_t latest_delta,
       max_gpus(max_gpus),
       actions_filename(actions_filename),
       has_logged_inputs_status(ATOMIC_FLAG_INIT) {
-    std::cout << "ConcurrentInferAndLoadScheduler using:" << std::endl;
+    std::cout << "Infer5 Scheduler using:" << std::endl;
     std::cout << "\t default_slo=" << default_slo << std::endl;
     std::cout << "\t latest_delta=" << latest_delta << std::endl;
     std::cout << "\t schedule_ahead=" << schedule_ahead << std::endl;
@@ -129,7 +130,7 @@ void Scheduler::RequestImpl::timeout() {
     response.departure = util::now();
     response.departure_count = model->copies_loaded;
 
-    //callback(response); // we ignored callback function for now
+    callback(response);
 
     model->tracker->cancelled(demand);
     model->invalidate_tracker();
@@ -297,7 +298,6 @@ Scheduler::InferAction* Scheduler::Model::try_dequeue(
     }
 
     // Create the action
-    std::cout << "Creating action for model " << this->id << ", batchsize = " << queue->batchsize << std::endl;
     uint64_t seqno;
     auto action = new InferAction(scheduler, this);
     for (unsigned i = 0; i < queue->batchsize; i++) {
@@ -452,7 +452,6 @@ float Scheduler::InferAction::complete(uint64_t now, int gpu_id) {
         if (request->complete(now, gpu_id)) {
             successful_requests += 1;
         }
-
         model->tracker->completed(request->demand, gpu_id);
         model->invalidate_tracker();
 
@@ -572,7 +571,7 @@ void Scheduler::GPU::grpc_send_action(InferAction* action) {
         return;
     }
     cluster_comm::BatchedInferRequest batched_infer_req;
-    batched_infer_req.set_id(action->action->id);
+    batched_infer_req.set_batch_id(action->action->id);
     std::vector<cluster_comm::InferRequest> infer_reqs;
 
     for (std::shared_ptr<RequestImpl> req : action->requests) {
@@ -592,7 +591,7 @@ void Scheduler::GPU::grpc_send_action(InferAction* action) {
 
         infer_reqs.push_back(infer_req);
     }
-    *batched_infer_req.mutable_batched_requests() = {infer_reqs.begin(), infer_reqs.end()};
+    *batched_infer_req.mutable_requests() = {infer_reqs.begin(), infer_reqs.end()};
     
     grpc::ClientContext context;
     grpc::CompletionQueue cq;
@@ -618,7 +617,6 @@ void Scheduler::GPU::grpc_send_action(InferAction* action) {
     //   std::cout << status.error_code() << ": " << status.error_message()
     //             << std::endl;
     // }
-    std::cout << "Action sent successfully" << std::endl;
 }
 
 void Scheduler::GPU::send_action(InferAction* action) {
@@ -907,8 +905,11 @@ bool Scheduler::GPU::schedule_infer() {
 
         schedule_infer_action_attempted++;
         if (action != nullptr) {
-            std::cout << "Sending action: " << action->action->str() << " to worker " << worker_id << "\n";
             schedule_infer_action_created++;
+            // Print for every 10 infer action created
+            if (schedule_infer_action_created % 20 == 0) {
+                std::cout << "Infer action created: " << schedule_infer_action_created << "\n";
+            }
             send_action(action);
             active = true;
             add_model_strategies(strategy.instance);
@@ -925,7 +926,7 @@ bool Scheduler::GPU::schedule_infer() {
         schedule_infer_inactive_count++;
     }
 
-    return active;  // we don't really use this variable...
+    return active;
 }
 
 void Scheduler::GPU::infer_error(InferAction* action, std::shared_ptr<workerapi::ErrorResult> &error) {
@@ -965,20 +966,20 @@ void Scheduler::GPU::infer_success(InferAction* action, std::shared_ptr<workerap
 
     action->set_result(result);
     action->telemetry.goodput = action->complete(util::now(), id);
-
     scheduler->printer->log(action->telemetry);
-
     delete action;
 }
 
 void Scheduler::GPU::infer_result(InferAction* action, std::shared_ptr<workerapi::Result> &result) {
     if (auto error = std::dynamic_pointer_cast<workerapi::ErrorResult>(result)) {
+        std::cout << "Calling infer_error\n";
         infer_error(action, error);
 
     } else if (auto infer = std::dynamic_pointer_cast<workerapi::InferResult>(result)) {
         infer_success(action, infer);
 
     } else {
+        std::cout << "Unexpected result\n";
         CHECK(false) << "Unexpected response to Infer action" << result->str();
 
     }
@@ -1163,9 +1164,8 @@ void Scheduler::initialize_gpus(std::vector<network::controller::WorkerConnectio
     std::cout << "Created " << gpus.size() << " GPUs on " << state.workers.size() << " Workers" << std::endl;
 }
 
+//This creates/initializes <ModelInstance>instances for each combination of model/GPU
 void Scheduler::initialize_model_instances() {
-    std::cout << "----------------workflow: src/clockwork/controller/infer5/infer5_scheduler.cpp: Scheduler::initialize_model_instances" << std::endl;
-    std::cout << "----------------This creates/initializes <ModelInstance>instances for each combination of model/GPU" << std::endl;
     for (auto &gpu : gpus) {
         gpu->instances.resize(models.size(), nullptr);
     }
@@ -1382,7 +1382,6 @@ void Scheduler::handle_result(std::shared_ptr<workerapi::Result> &result) {
     Callback callback;
     {
         tbb::queuing_mutex::scoped_lock lock(callbacks_mutex);
-
         auto it = callbacks.find(result->id);
         CHECK(it != callbacks.end()) 
             << "Received result for non-existent action " << result->str();
@@ -1390,7 +1389,6 @@ void Scheduler::handle_result(std::shared_ptr<workerapi::Result> &result) {
         callback = it->second;
         callbacks.erase(it);
     }
-
     callback(result);
 }
 

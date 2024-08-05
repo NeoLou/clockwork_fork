@@ -2,6 +2,7 @@
 #include "clockwork/controller/scheduler.h"
 #include <python3.7m/Python.h>
 #include <python3.7m/object.h>
+#include <memory>
 #include <vector>
 //#include <torch/torch.h>
 
@@ -77,7 +78,6 @@ static std::vector<unsigned> convertPyListToUnsignedVector(PyObject* pyList) {
 extern "C" {
     
     void *createScheduler() {
-        std::cout << "Create Clockwork Scheduler" << std::endl;
         bool generate_inputs = false;
         int max_gpus = 100;
         uint64_t schedule_ahead = (generate_inputs ? 15000000UL : 10000000UL);
@@ -95,7 +95,7 @@ extern "C" {
             max_batch_size,
             actions_filename
         );
-        std::cout << "Finished creating Clockwork Scheduler" << std::endl;
+        std::cout << "Created Clockwork Scheduler" << std::endl;
         return scheduler;
     }
 
@@ -139,12 +139,11 @@ extern "C" {
         ClockworkState state;
         state.page_size = 4096;  // hard code
         state.workers = {};
-        std::cout << "initial state: " << state.str() << std::endl;
+        std::cout << "Initial Clockwork state: " << state.str() << std::endl;
 
         // Populate ClockworkState workers
 
         // Generate WorkerState
-        std::cout << "Populate ClockworkState workers" << std::endl;
         PyObject *model_id, *node_local_id_list;
         Py_ssize_t pos = 0;
         bool first_loop = true;
@@ -195,7 +194,6 @@ extern "C" {
         // Now, populate gpus for each worker_state
         
         // Generate GPUState
-        std::cout << "Populate ClockworkState gpus" << std::endl;
         PyObject *gpu_global_id, *gpu_obj;
         pos = 0;
         while (PyDict_Next(gpus_dict, &pos, &gpu_global_id, &gpu_obj)) { // key: gpu_global_id, value: gpu_obj
@@ -218,7 +216,6 @@ extern "C" {
                     gpu_state.loaded_models.push_back(model_id);
                 }
             }
-            std::cout << "gpu_state: " << gpu_state.str() << std::endl;
 
             // Insert gpu_state into worker_state
             PyObject *node = PyObject_GetAttrString(gpu_obj, "node");
@@ -260,7 +257,7 @@ extern "C" {
         std::cout << "Finished starting Clockwork Scheduler" << std::endl;
     }
 
-     void insertOrionRequestInClockwork(SCHED_T *scheduler, char *req_uuid, int req_local_id,int client_id, int model_id, int slo,
+     void insertOrionRequestInClockwork(SCHED_T *scheduler, char *req_uuid, int req_local_id, int client_id, int model_id, int slo,
                                         char *tensor_bytes, int tensor_bytes_size, int *tensor_shape, int tensor_shape_size) {
         /*
         ------------------------------- Request data format -------------------------------
@@ -300,14 +297,20 @@ extern "C" {
 	    request->input_size = tensor_bytes_size;
         request->input_shape = tensor_shape_vec;
         request->slo = slo;
+        std::function<void (clientapi::InferenceResponse &)> callback = [] (clientapi::InferenceResponse &) {}; // create blank callback
         if (request->arrival == 0) {
 		    request->arrival = util::now();
 	    }
-        std::function<void (clientapi::InferenceResponse &)> callback; // create blank callback
         scheduler->clientInfer(*request, callback);
     }
 
-    void insertOrionResultInClockwork(SCHED_T *scheduler, char *req_uuid) {
+    std::uint64_t getClockworkTimeNow() {
+        auto time_now = util::now();
+        return time_now;  // in nanoseconds
+        
+    }
+
+    void insertOrionResultInClockwork(SCHED_T *scheduler, int batch_res_id, int exec_start, int exec_end) {
         /*
         ------------------------------- Result data format -------------------------------
         tbb::concurrent_queue<std::shared_ptr<workerapi::Result>> result_queue;
@@ -342,26 +345,55 @@ extern "C" {
         */
 
         // Create InferenceRequest
-        auto result = new workerapi::InferResult();
-	    // result->id = client_id;
-	    // request->header.user_request_id = req_local_id;
-        // request->uuid = std::string(req_uuid);
-	    // request->model_id = model_id;
-	    // request->batch_size = 1;
-        // request->slo_factor = 0;
-        // request->input = new_tensor_bytes;
-	    // request->input_size = tensor_bytes_size;
-        // request->input_shape = tensor_shape_vec;
-        // request->slo = slo;
-        // if (request->arrival == 0) {
-		//     request->arrival = util::now();
-	    // }
-        // std::function<void (clientapi::InferenceResponse &)> callback; // create blank callback
-        // scheduler->clientInfer(*request, callback);
+        // Reproducing this function: void InferAction::handle_completion(char* output)
+        std::shared_ptr<workerapi::InferResult> result = std::make_shared<workerapi::InferResult>();
+        
+        /* Variables needed to proceed:
+	    result->id;
+        result->exec.end;
+        result->exec.duration;
+        result->gpu_clock;
+        result->gpu_clock_before;
+        */
+
+        result->id = batch_res_id;
+        result->action_type = workerapi::inferAction;
+        result->status = actionSuccess;
+        result->output_size = 0;
+        result->output = nullptr;
+
+        // Ignore copy_input and copy_output for now
+        // extract_timing_async(&result->copy_input, copy_input->telemetry);
+        // extract_timing_async(&result->copy_output, copy_output->telemetry);
+        result->exec.begin = exec_start;
+        result->exec.end = exec_end;
+        result->exec.duration = exec_end - exec_start;
+
+        // result->gpu_id = action->gpu_id;
+        result->gpu_clock_before = 1900; // in MHz, hard code for now
+        result->gpu_clock = 1900; // in MHz, hard code for now
+
+        // Reproducing this function: void Infer::success(std::shared_ptr<workerapi::InferResult> result)
+        // Ignore effect of clock_delta for now
+        // result->copy_input.begin = adjust_timestamp(result->copy_input.begin, -action->clock_delta);
+        // result->copy_input.end = adjust_timestamp(result->copy_input.end, -action->clock_delta);
+        // result->exec.begin = adjust_timestamp(result->exec.begin, -action->clock_delta);
+        // result->exec.end = adjust_timestamp(result->exec.end, -action->clock_delta);
+        // result->copy_output.begin = adjust_timestamp(result->copy_output.begin, -action->clock_delta);
+        // result->copy_output.end = adjust_timestamp(result->copy_output.end, -action->clock_delta);
+        // result->action_received = adjust_timestamp(action->received, -action->clock_delta);
+        // result->clock_delta = action->clock_delta;
+
+        scheduler->resultFromWorker(result);
     }
 
-    bool isClockworkReqQueueEmpty(SCHED_T *scheduler) {
+    bool isClockworkRequestQueueEmpty(SCHED_T *scheduler) {
         bool is_empty = scheduler->request_queue.empty();
+        return is_empty;
+    }
+
+    bool isClockworkResultQueueEmpty(SCHED_T *scheduler) {
+        bool is_empty = scheduler->result_queue.empty();
         return is_empty;
     }
 
@@ -405,7 +437,7 @@ extern "C" {
         uint64_t now = util::now();
         while (!admission_thread_memory->timeout_queue.empty()) {
             auto &request = admission_thread_memory->timeout_queue.top();
-            if (request->deadline > now) break;  // TODO(louneo): fix the deadline
+            if (request->deadline > now) break;
             // print every 10 requests
             if (admission_thread_memory->dropped % 50 == 0) {
                 std::cout << admission_thread_memory->dropped << " requests dropped" << std::endl;
@@ -427,7 +459,7 @@ extern "C" {
     }
 
     // Clockwork runs 5 infer threads
-    void runInferThread(SCHED_T *scheduler) {
+    bool runInferThread(SCHED_T *scheduler) {
         // std::stringstream msg;
         // msg << "GPU infer thread [" << id << "] started" << std::endl;
         // std::cout << msg.str();
@@ -439,6 +471,7 @@ extern "C" {
         uint64_t i = (scheduler->next_infer++) % n_gpus;
         bool active = scheduler->gpus[i]->schedule_infer();
         // }
+        return active;
     }
 
     // Clockwork runs 1 tracker threads
@@ -468,40 +501,40 @@ extern "C" {
     }
 
     // Clockwork runs 2 results threads
-    void runResultsThread(SCHED_T *scheduler) {
-        std::cout << "Result thread running\n";
-        bool should_timeout = false;
-        SCHED_T::TimeoutResult next_timeout;
+    void runResultThread(SCHED_T *scheduler) {
+        // std::cout << "Result thread running\n";
+        // bool should_timeout = false;
+        // SCHED_T::TimeoutResult next_timeout;
 
-        int i = 0;
-        while (true) {
-            bool active = false;
+        // int i = 0;
+        // while (true) {
+        // bool active = false;
 
-            std::shared_ptr<workerapi::Result> result;
-            if (scheduler->result_queue.try_pop(result)) {
-                scheduler->handle_result(result);
-                active = true;
-                i++;
-            }
-
-            if (!should_timeout) {
-                should_timeout = scheduler->network_timeout_queue.try_pop(next_timeout);
-            }
-
-            if (should_timeout) {
-                if (next_timeout.timeout_at <= util::now()) {
-                    scheduler->handle_result(next_timeout.result);
-                    should_timeout = false;
-                    active = true;
-                    i++;
-                }
-            }
-
-            if (!active || i >= 100) {
-                usleep(10);
-                i = 0;
-            }
+        std::shared_ptr<workerapi::Result> result;
+        if (scheduler->result_queue.try_pop(result)) {
+            scheduler->handle_result(result);
+            // active = true;
+            // i++;
         }
+
+        // if (!should_timeout) {
+        //     should_timeout = scheduler->network_timeout_queue.try_pop(next_timeout);
+        // }
+
+        // if (should_timeout) {
+        //     if (next_timeout.timeout_at <= util::now()) {
+        //         scheduler->handle_result(next_timeout.result);
+        //         should_timeout = false;
+        //         active = true;
+        //         i++;
+        //     }
+        // }
+
+        // if (!active || i >= 100) {
+        //     usleep(10);
+        //     i = 0;
+        // }
+        // }
     }
 
     // Clockwork runs 5 load threads
@@ -519,42 +552,4 @@ extern "C" {
         }
 
     }
-
-    // void runController() {
-    //     std::string actions_filename = util::get_controller_log_dir() + "/clockwork_action_log.tsv";
-    //     std::string requests_filename = util::get_controller_log_dir() + "/clockwork_request_log.tsv";
-    //     int client_requests_listen_port = 12346;
-    //     std::vector<std::pair<std::string, std::string>> worker_host_port_pairs = {{"localhost", "12345"}};
-        
-    //     int i = 2;
-    //     bool generate_inputs = false;
-    //     int max_gpus = 100;
-    //     uint64_t schedule_ahead = (generate_inputs ? 15000000UL : 10000000UL);
-    //     uint64_t default_slo = 100000000UL;
-    //     uint64_t max_exec_time = 250000000UL;
-    //     int max_batch_size = 8;
-    //     //std::cout << "Logging requests to " << requests_filename << std::endl;
-    //     //std::cout << "Logging actions to " << actions_filename << std::endl;
-    //     Scheduler* scheduler = new scheduler::infer5::Scheduler(
-    //         default_slo,
-    //         schedule_ahead, schedule_ahead,
-    //         generate_inputs,
-    //         max_gpus,
-    //         max_exec_time,
-    //         max_batch_size,
-    //         actions_filename
-    //     );
-    //     controller::ControllerWithStartupPhase* controller = new controller::ControllerWithStartupPhase(
-    //         client_requests_listen_port,
-    //         worker_host_port_pairs,
-    //         1000000000UL, // 10s load stage timeout
-    //         new controller::ControllerStartup(max_batch_size, max_exec_time), // in future the startup type might be customizable
-    //         scheduler,
-    //         ControllerRequestTelemetry::log_and_summarize(
-    //             requests_filename,     // 
-    //             10000000000UL
-    //         )
-    //     );
-    //     controller->join();
-    // }
 }

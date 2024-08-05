@@ -35,7 +35,7 @@ private:
 		if (outstanding.size() > 0) {
 			work_begin = std::max(work_begin, outstanding.front().work_begin);
 		}
-		std::cout << "Updated work_begin to: " << work_begin << ", total_outstanding: " << total_outstanding << std::endl;
+		// std::cout << "Updated work_begin to: " << work_begin << ", total_outstanding: " << total_outstanding << std::endl;
 	}
 
 public:

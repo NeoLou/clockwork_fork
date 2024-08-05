@@ -1,8 +1,10 @@
 #include "clockwork/controller/infer5/infer5_scheduler.h"
 #include "clockwork/controller/scheduler.h"
+#include <cstdint>
 #include <python3.7m/Python.h>
 #include <python3.7m/object.h>
 #include <memory>
+#include <sys/types.h>
 #include <vector>
 //#include <torch/torch.h>
 
@@ -310,7 +312,7 @@ extern "C" {
         
     }
 
-    void insertOrionResultInClockwork(SCHED_T *scheduler, int batch_res_id, int exec_start, int exec_end) {
+    void insertOrionResultInClockwork(SCHED_T *scheduler, int batch_res_id, uint64_t exec_start, uint64_t exec_end) {
         /*
         ------------------------------- Result data format -------------------------------
         tbb::concurrent_queue<std::shared_ptr<workerapi::Result>> result_queue;
@@ -370,11 +372,12 @@ extern "C" {
         result->exec.duration = exec_end - exec_start;
 
         // result->gpu_id = action->gpu_id;
-        result->gpu_clock_before = 1900; // in MHz, hard code for now
-        result->gpu_clock = 1900; // in MHz, hard code for now
+        result->gpu_clock_before = 1380; // in MHz, hard code for now (same as worker_dummy.cpp in clockwork)
+        result->gpu_clock = 1380; // in MHz, hard code for now same as worker_dummy.cpp in clockwork)
 
         // Reproducing this function: void Infer::success(std::shared_ptr<workerapi::InferResult> result)
         // Ignore effect of clock_delta for now
+        // TODO(neolou): add clock_delta somehow
         // result->copy_input.begin = adjust_timestamp(result->copy_input.begin, -action->clock_delta);
         // result->copy_input.end = adjust_timestamp(result->copy_input.end, -action->clock_delta);
         // result->exec.begin = adjust_timestamp(result->exec.begin, -action->clock_delta);
@@ -392,10 +395,10 @@ extern "C" {
         return is_empty;
     }
 
-    bool isClockworkResultQueueEmpty(SCHED_T *scheduler) {
-        bool is_empty = scheduler->result_queue.empty();
-        return is_empty;
-    }
+    // bool isClockworkResultQueueEmpty(SCHED_T *scheduler) {
+    //     bool is_empty = scheduler->result_queue.empty();
+    //     return is_empty;
+    // }
 
     AdmissionThreadMemory *initAdmissionThread() {
         return new AdmissionThreadMemory();
@@ -433,15 +436,11 @@ extern "C" {
             admission_thread_memory->i++;
         }
 
-        // Drop any timed out requests
+        // Process timed out requests
         uint64_t now = util::now();
         while (!admission_thread_memory->timeout_queue.empty()) {
             auto &request = admission_thread_memory->timeout_queue.top();
             if (request->deadline > now) break;
-            // print every 10 requests
-            if (admission_thread_memory->dropped % 50 == 0) {
-                std::cout << admission_thread_memory->dropped << " requests dropped" << std::endl;
-            }
             request->finalize();
             admission_thread_memory->timeout_queue.pop();
             active = true;
@@ -501,21 +500,22 @@ extern "C" {
     }
 
     // Clockwork runs 2 results threads
-    void runResultThread(SCHED_T *scheduler) {
+    bool runResultThread(SCHED_T *scheduler) {
         // std::cout << "Result thread running\n";
         // bool should_timeout = false;
         // SCHED_T::TimeoutResult next_timeout;
 
         // int i = 0;
         // while (true) {
-        // bool active = false;
+        bool active = false;
 
         std::shared_ptr<workerapi::Result> result;
         if (scheduler->result_queue.try_pop(result)) {
             scheduler->handle_result(result);
-            // active = true;
+            active = true;
             // i++;
         }
+        return active;
 
         // if (!should_timeout) {
         //     should_timeout = scheduler->network_timeout_queue.try_pop(next_timeout);

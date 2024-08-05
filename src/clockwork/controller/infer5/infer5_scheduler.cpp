@@ -874,7 +874,7 @@ bool Scheduler::GPU::schedule_infer() {
         // schedule_until = how far we want to schedule until (in the future)
         uint64_t schedule_until = util::now() + scheduler->schedule_ahead; // schedule_ahead is 10ms by default
         if (exec_at >= schedule_until) {  // If time to schedule is to far in the future, don't schedule yet, keep looping
-            std::cout << "Not scheduling yet, exec_at: " << exec_at << ", schedule_until: " << schedule_until << "\n";
+            // std::cout << "Not scheduling yet, exec_at: " << exec_at << ", schedule_until: " << schedule_until << "\n";
             schedule_infer_exec_full++;
             break;
         }
@@ -907,7 +907,7 @@ bool Scheduler::GPU::schedule_infer() {
         if (action != nullptr) {
             schedule_infer_action_created++;
             // Print for every 10 infer action created
-            if (schedule_infer_action_created % 20 == 0) {
+            if (schedule_infer_action_created % 5 == 0) {
                 std::cout << "Infer action created: " << schedule_infer_action_created << "\n";
             }
             send_action(action);
@@ -971,6 +971,7 @@ void Scheduler::GPU::infer_success(InferAction* action, std::shared_ptr<workerap
 }
 
 void Scheduler::GPU::infer_result(InferAction* action, std::shared_ptr<workerapi::Result> &result) {
+    
     if (auto error = std::dynamic_pointer_cast<workerapi::ErrorResult>(result)) {
         std::cout << "Calling infer_error\n";
         infer_error(action, error);

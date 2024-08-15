@@ -26,7 +26,7 @@ class LoadTracker {
         int64_t loadweights_size;
     };
 
- private:
+//  private:
     const int64_t capacity; // For now just use the slo
     struct ModelPriority;
     struct Model {

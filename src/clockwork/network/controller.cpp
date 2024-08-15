@@ -268,7 +268,7 @@ message_rx* ClientConnection::new_rx_message(message_connection *tcp_conn, uint6
 	// }
 	
 	// CHECK(false) << "Unsupported msg_type " << msg_type;
-	// return nullptr;
+	return nullptr;
 }
 
 void ClientConnection::ready() {

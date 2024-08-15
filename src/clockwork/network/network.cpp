@@ -197,8 +197,10 @@ void message_receiver::handle_header_read(const asio::error_code& error,
     return;
   }
 
-  int64_t delta = rx_begin_ - pre_header[4];
-  handler_.synchronize(delta, pre_header[5]);
+  int64_t delta = rx_begin_ - pre_header[4]; // rx_bing_ = when handle_pre_read happens, pre_header[4] = when message start_send -> delta = time between message sent and message pre_read
+  handler_.synchronize(delta, pre_header[5]);  // pre_header[5] = handler_.local_delta_ = local_delta of handler_ during previous message sent
+  // local_delta_ = min of window of time between message sent/read
+  // remote_delta_ = min of window of time of previous local_delta_'s
 
   req_ = handler_.new_rx_message(conn_, pre_header[0], pre_header[1],
       pre_header[2], pre_header[3]);

@@ -11,6 +11,7 @@
 #include "clockwork/controller/scheduler.h"
 #include "clockwork/controller/worker_tracker.h"
 #include "clockwork/controller/infer5/load_tracker.h"
+#include "clockwork/network/network.h"
 #include "clockwork/telemetry/controller_action_logger.h"
 #include "clockwork/thread.h"
 #include "clockwork/api/worker_api.h"
@@ -420,7 +421,9 @@ class Scheduler : public clockwork::Scheduler {
         void send_action(EvictWeightsAction* action);
 
         // Sending actions to Orion workers through gRPC
-        void grpc_send_action(InferAction* action);
+        void grpc_send_action(InferAction* action, uint64_t send_by);
+        void grpc_send_action(LoadWeightsAction* action, uint64_t send_by);
+        void grpc_send_action(EvictWeightsAction* action, uint64_t send_by);
 
         void add_model_strategies(ModelInstance* instance, int max_batchsize=INT_MAX);
 
@@ -468,6 +471,36 @@ class Scheduler : public clockwork::Scheduler {
 
     };
 
+    // Class added to scheduler Based on: src/clockwork/network/network.h (to help with inserting orion results in clockwork)
+    class SchedulerMessageHandler {
+        public:
+
+        // time synchronization
+        void synchronize(int64_t local_delta, int64_t remote_delta) {
+            local_delta_tracker.insert(local_delta);
+            remote_delta_tracker.insert(remote_delta);
+            local_delta_ = local_delta_tracker.get_min();
+            remote_delta_ = remote_delta_tracker.get_min();
+        }
+
+        int64_t estimate_clock_delta() {
+            if (remote_delta_ == INT64_MAX) return 0;
+            return (local_delta_ - remote_delta_) / 2;
+        }
+
+        int64_t estimate_rtt() {
+            if (remote_delta_ == INT64_MAX) return 0;
+            return (local_delta_ + remote_delta_);
+        }
+
+        int64_t local_delta_ = INT64_MAX;
+        int64_t remote_delta_ = INT64_MAX;
+        SlidingWindowT<int64_t> local_delta_tracker = SlidingWindowT<int64_t>(1024);
+        SlidingWindowT<int64_t> remote_delta_tracker = SlidingWindowT<int64_t>(1024);
+
+    };
+
+
  public:
 
     // Track the load on each model, used for LoadWeights/EvictWeights
@@ -482,6 +515,11 @@ class Scheduler : public clockwork::Scheduler {
     std::atomic_uint64_t next_load = 0;
     std::atomic_uint64_t next_infer = 0;
     std::atomic_uint64_t request_count = 0;
+
+    // Variable added to help with integrating in orion
+    SchedulerMessageHandler scheduler_message_handler = SchedulerMessageHandler();  // for inserting orion results in clockwork
+    std::vector<Model*> tracker_models;  // for runTrackerThread in python_bindings.cpp
+
 
  //private:
     // Threads

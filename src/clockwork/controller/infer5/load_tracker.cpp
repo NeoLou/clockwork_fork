@@ -80,9 +80,12 @@ void LoadTracker::attach(GPU &gpu) {
         // Put back in to priority queues
         if (priority->model->loading[gpu.id]) {
             // Loading on a GPU is neither loadable nor evictable
+            std::cout << "Attach: model with id " << priority->model->id << " is loading on gpu" << std::endl;
         } else if (priority->model->gpus[gpu.id]) {  // if model is loaded
+            std::cout << "Attach: insert model with id " << priority->model->id << " in gpu cached" << std::endl;
             gpu.cached.insert(priority);
         } else {
+            std::cout << "Attach: insert model with id " << priority->model->id << " in gpu not cached" << std::endl;
             gpu.not_cached.insert(priority);
         }
 
@@ -264,6 +267,8 @@ void LoadTracker::addGPU(Model &model, GPU &gpu) {
     CHECK(!model.loading[gpu.id]) << "Adding model to GPU that is already loading it";
     CHECK(!gpu.models[model.id]) << "Adding model to GPU that thinks it already has it";
 
+    // std::cout << "addGPU: model: " << model.id << ", gpu: " << gpu.id << std::endl;
+
     model.gpus[gpu.id] = true;
     model.loading[gpu.id] = true;
     gpu.models[model.id] = true;
@@ -275,6 +280,8 @@ void LoadTracker::addGPUcomplete(Model &model, GPU &gpu) {
     CHECK(model.gpus[gpu.id]) << "Model load completed on GPU that didn't expect it";
     CHECK(gpu.models[model.id]) << "Model load completed on GPU that didn't expect it";
     CHECK(model.loading[gpu.id]) << "Model load completed on GPU that wasn't loading";
+
+    // std::cout << "addGPUcomplete: model: " << model.id << ", gpu: " << gpu.id << std::endl;
 
     model.loading[gpu.id] = false;
     model.last_used[gpu.id] = seqno_seed++;
@@ -348,7 +355,7 @@ n_models(num_models), n_gpus(num_gpus), capacity(capacity) {
     for (unsigned i = 0; i < num_models; i++) {
         auto &model = models[i];
         model.id = i;
-        model.gpus.resize(num_gpus, false);
+        model.gpus.resize(num_gpus, false);  // resize from size '0' to size 'num_gpus'
         model.loading.resize(num_gpus, false);
         model.allocations.resize(num_gpus, 0);
         model.last_used.resize(num_gpus, 0);
@@ -361,6 +368,8 @@ n_models(num_models), n_gpus(num_gpus), capacity(capacity) {
             auto priority = new ModelPriority(&model);
             priority->last_used = model.last_used[j];
             model.priorities[j] = priority;
+
+            std::cout << "Model " << model.id << " priority " << priority->preference << " on GPU (not cached) " << j << std::endl;
 
             gpus[j].not_cached.insert(priority);
         }
@@ -387,17 +396,28 @@ int LoadTracker::loadModel(int gpu_id, bool requires_eviction) {
     refreshPriorities(); // update load priority of models
     attach(gpu);  // attach model to priority queues of gpu
 
-    if (gpu.not_cached.size() == 0) return -1;  // if no models to load
-
+    if (gpu.not_cached.size() == 0) {
+        // std::cout << "loadModel error: gpu.not_cached has no models to load" << std::endl;
+        return -1;  // if no models to load
+    }
     auto &priority = *gpu.not_cached.begin();
-    if (priority->is_empty) return -1;  // // if no models to load
-    if (priority <= 0) return -1; // all demand satisfied
-
+    if (priority->is_empty) {  // bool is_empty = model.outstanding_loadweights == 0 && model.outstanding_exec == 0;
+        // std::cout << "loadModel error: model priority is empty, model: " << priority->model->id << ", model.outstanding_loadweights: " << priority->model->outstanding_loadweights << ", model.outstanding_exec: " << priority->model->outstanding_exec << std::endl;
+        return -1;  // // if no models to load
+    }
+    if (priority <= 0) {
+        std::cout << "loadModel error: all demand satisfied" << std::endl;
+        return -1; // all demand satisfied
+    }
     // Load model
     Model &model = *(priority->model);
+    // std::cout << "loadModel: detach" << std::endl;
     detach(model);  // remove model from priority queues
+    // std::cout << "loadModel: invalidatePriorities" << std::endl;
     invalidatePriorities(model);  // mark model as 'stale'
+    // std::cout << "loadModel: addGPU" << std::endl;
     addGPU(model, gpu);  // update flags to indicate loading
+    // std::cout << "loadModel: distributeLoad" << std::endl;
     distributeLoad(model);  // distribute allocation of load on GPUs
 
     return model.id;
@@ -418,8 +438,9 @@ int LoadTracker::evictModel(int gpu_id) {
     attach(gpus[gpu_id]);
 
     auto &gpu = gpus[gpu_id];
-    if (gpu.cached.size() == 0) return -1;
-
+    if (gpu.cached.size() == 0) {
+        return -1;
+    }
     auto &priority = *gpu.cached.rbegin();
     Model &model = *(priority->model);
 

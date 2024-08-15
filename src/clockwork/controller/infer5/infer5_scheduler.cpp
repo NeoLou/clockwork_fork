@@ -1,8 +1,10 @@
 #include "clockwork/controller/infer5/infer5_scheduler.h"
+#include "clockwork/action.h"
 #include "cluster_comm.pb.h"
 #include <grpcpp/impl/codegen/status.h>
 #include <iostream>
 #include <memory>
+#include <ostream>
 #include <unistd.h>
 #include <vector>
 
@@ -292,8 +294,8 @@ Scheduler::InferAction* Scheduler::Model::try_dequeue(
         //std::cout << "Not enough requests available, batchsize = " << queue->batchsize << ", min_batchsize = " << min_batchsize << std::endl;
         return nullptr;
     }
-    if (!queue->has_demand()) {
-        std::cout << "Queue has no demand" << std::endl;
+    if (!queue->has_demand()) { // If size of queue is more or equal to batchsize, has_demand = true
+        // std::cout << "Queue has no demand" << std::endl;
         return nullptr;
     }
 
@@ -512,6 +514,7 @@ void Scheduler::LoadWeightsAction::set_error(std::shared_ptr<workerapi::ErrorRes
 void Scheduler::LoadWeightsAction::set_result(std::shared_ptr<workerapi::LoadWeightsResult> &result) {
     this->result = result;
     if (version == instance->version) {
+        std::cout << "Loaded model " << instance->model->id << " version " << instance->version << std::endl;
         instance->loaded = true;
         instance->loading = false;
     }
@@ -564,16 +567,15 @@ Scheduler::GPU::GPU(
       loadweights(Scheduler::default_clock, Scheduler::lag, Scheduler::future) {
 }
 
-void Scheduler::GPU::grpc_send_action(InferAction* action) {
+void Scheduler::GPU::grpc_send_action(InferAction* action, uint64_t send_by) {
     uint64_t now = util::now();
-    if (action->send_by < now) {
-        std::cout << "Could not send action to worker in time, action->send_by: " << action->send_by << " now: " << now << "" << std::endl;
+    if (send_by < now) {
+        std::cout << "Could not send action to worker in time, action->send_by: " << send_by << " now: " << now << "" << std::endl;
         return;
     }
     cluster_comm::BatchedInferRequest batched_infer_req;
     batched_infer_req.set_batch_id(action->action->id);
     std::vector<cluster_comm::InferRequest> infer_reqs;
-
     for (std::shared_ptr<RequestImpl> req : action->requests) {
         // Create tensor proto object
         cluster_comm::Tensor input_tensor;
@@ -593,18 +595,123 @@ void Scheduler::GPU::grpc_send_action(InferAction* action) {
     }
     *batched_infer_req.mutable_requests() = {infer_reqs.begin(), infer_reqs.end()};
     
+    // Code for async send request (skip error check for now, implement in future)
+    // Note: I'm not sure this is 100% async, need to check
     grpc::ClientContext context;
     grpc::CompletionQueue cq;
     cluster_comm::Empty reply;
-
-    // Code for async send request (skip error check for now, implement in future)
-    // Note: I'm not sure this is 100% async, need to check
     grpc::Status status;
+
+    uint64_t time_message_sent = util::now();
+    batched_infer_req.set_time_message_sent(time_message_sent);
+
     std::unique_ptr<grpc::ClientAsyncResponseReader<cluster_comm::Empty>> rpc(
         stub_->AsyncsendBatchInferReq(&context, batched_infer_req, &cq));
     rpc->Finish(&reply, &status, (void*)1);
 
-    // // Error check
+    // Error check
+    // void* got_tag;
+    // bool ok = false;
+    // CHECK(cq.Next(&got_tag, &ok));
+    // CHECK_EQ(got_tag, (void*)1);
+    // CHECK(ok);
+    // if (status.ok()) {
+    //   std::cout << "RPC successful" << std::endl;
+    // } else {
+    //   std::cout << "RPC failed" << std::endl;
+    //   std::cout << status.error_code() << ": " << status.error_message()
+    //             << std::endl;
+    // }
+}
+
+void Scheduler::GPU::grpc_send_action(LoadWeightsAction* action, uint64_t send_by) {
+    uint64_t now = util::now();
+    if (send_by < now) {
+        std::cout << "Could not send action to worker in time, action->send_by: " << send_by << " now: " << now << "" << std::endl;
+        return;
+    }
+    /* Data types
+    message ModelPlacement {
+        int32 model_id = 1;
+        string model_name = 2;
+        int32 local_gpu_id = 3;
+        float resource_share = 4;
+        int32 batch_size = 5;
+        int32 slo = 6;
+        int32 assigned_mem = 7;
+        int32 assigned_sm = 8;
+    }
+    */
+    cluster_comm::ModelPlacement model_placement;
+    model_placement.set_model_id(action->action->model_id);
+    model_placement.set_local_gpu_id(action->action->gpu_id);
+    model_placement.set_resource_share(100.0f); // hard code for now
+    model_placement.set_batch_size(1); // hard code for now
+    model_placement.set_action_id(action->action->id);
+    
+    // Code for async send request (skip error check for now, implement in future)
+    // Note: I'm not sure this is 100% async, need to check
+    grpc::ClientContext context;
+    grpc::CompletionQueue cq;
+    cluster_comm::Empty reply;
+    grpc::Status status;
+    std::unique_ptr<grpc::ClientAsyncResponseReader<cluster_comm::Empty>> rpc(
+        stub_->AsyncloadModel(&context, model_placement, &cq));
+    rpc->Finish(&reply, &status, (void*)1);
+
+    // Error check
+    // void* got_tag;
+    // bool ok = false;
+    // CHECK(cq.Next(&got_tag, &ok));
+    // CHECK_EQ(got_tag, (void*)1);
+    // CHECK(ok);
+    // if (status.ok()) {
+    //   std::cout << "RPC successful" << std::endl;
+    // } else {
+    //   std::cout << "RPC failed" << std::endl;
+    //   std::cout << status.error_code() << ": " << status.error_message()
+    //             << std::endl;
+    // }
+}
+
+void Scheduler::GPU::grpc_send_action(EvictWeightsAction* action, uint64_t send_by) {
+    uint64_t now = util::now();
+    if (send_by < now) {
+        std::cout << "Could not send action to worker in time, action->send_by: " << send_by << " now: " << now << "" << std::endl;
+        return;
+    }
+    
+    /* Data types
+    message ModelPlacement {
+        int32 model_id = 1;
+        string model_name = 2;
+        int32 local_gpu_id = 3;
+        float resource_share = 4;
+        int32 batch_size = 5;
+        int32 slo = 6;
+        int32 assigned_mem = 7;
+        int32 assigned_sm = 8;
+    }
+    */
+
+    cluster_comm::ModelPlacement model_placement;
+    model_placement.set_model_id(action->action->model_id);
+    model_placement.set_local_gpu_id(action->action->gpu_id);
+    model_placement.set_resource_share(100.0f); // hard code for now
+    model_placement.set_batch_size(1); // hard code for now
+    model_placement.set_action_id(action->action->id);
+
+    // Code for async send request (skip error check for now, implement in future)
+    // Note: I'm not sure this is 100% async, need to check
+    grpc::ClientContext context;
+    grpc::CompletionQueue cq;
+    cluster_comm::Empty reply;
+    grpc::Status status;
+    std::unique_ptr<grpc::ClientAsyncResponseReader<cluster_comm::Empty>> rpc(
+        stub_->AsyncevictModel(&context, model_placement, &cq));
+    rpc->Finish(&reply, &status, (void*)1);
+
+    // Error check
     // void* got_tag;
     // bool ok = false;
     // CHECK(cq.Next(&got_tag, &ok));
@@ -649,7 +756,7 @@ void Scheduler::GPU::send_action(InferAction* action) {
 
     // Send the action
     // use our own C++ gRPC function to send action instead of clockwork network function
-    this->grpc_send_action(action);
+    this->grpc_send_action(action, action->send_by);
 
     // if action not sent by time "send_by", don't send and report error at time "report_error_at"
     // scheduler->network->send(worker, infer, action->send_by, action->report_error_at);
@@ -680,7 +787,11 @@ void Scheduler::GPU::send_action(LoadWeightsAction* action) {
     action->telemetry.copies_loaded = action->instance->model->copies_loaded;
 
     // Send the action
-    scheduler->network->send(worker, load, UINT64_MAX, 0);
+    // use our own C++ gRPC function to send action instead of clockwork network function
+    this->grpc_send_action(action, UINT64_MAX);
+
+    // scheduler->network->send(worker, load, UINT64_MAX, 0);
+
 
     if (print_debug || print_loads) std::cout << ("Worker <--  " + load->str() + "\n");
 }
@@ -702,7 +813,10 @@ void Scheduler::GPU::send_action(EvictWeightsAction* action) {
     action->telemetry.copies_loaded = action->instance->model->copies_loaded+1;
 
     // Send the action
-    scheduler->network->send(worker, evict, UINT64_MAX, 0);
+    // use our own C++ gRPC function to send action instead of clockwork network function
+    this->grpc_send_action(action,UINT64_MAX);
+
+    // scheduler->network->send(worker, evict, UINT64_MAX, 0);
 
     if (print_debug || print_loads) std::cout << ("Worker <--  " + evict->str() + "\n");    
 }
@@ -732,8 +846,10 @@ std::vector<Scheduler::EvictWeightsAction*> Scheduler::GPU::evict_pages(unsigned
         EvictWeightsAction* evict = new EvictWeightsAction(instance);
         evict->set_expectations();
         ret.push_back(evict);
-        
+
+        std::cout << "Free pages before eviction: " << free_pages << "\n";
         free_pages += scheduler->models[model_id]->num_weights_pages;
+        std::cout << "Free pages after eviction: " << free_pages << "\n";
         eviction_required = true; // GPU reached capacity; evictions required in future
     }
     return ret;
@@ -756,8 +872,10 @@ bool Scheduler::GPU::schedule_load() {
     }
 
     uint64_t now = util::now();
-    if (available >= now + scheduler->schedule_ahead) return false;  // schedule_ahead = 10ms by default
-                                                                     // don't schedule if gpu isn't available 10ms from now
+    if (available >= now + scheduler->schedule_ahead) {
+        // std::cout << "Not scheduling load yet, available: " << available << " now: " << now << "\n";
+        return false;  // schedule_ahead = 10ms by default
+    }                                                             // don't schedule if gpu isn't available 10ms from now
     ModelInstance* instance;
     unsigned size;
     std::vector<EvictWeightsAction*> evict_actions;
@@ -771,6 +889,8 @@ bool Scheduler::GPU::schedule_load() {
         }
 
         instance = instances[model_id];
+        // std::cout << "creating load/evict action for model with id " << model_id << ", loaded: " << instance->loaded << ", loading: " << instance->loading << std::endl;
+
         CHECK(instance->loaded == false && instance->loading == false) << "Tracker asked to load model that is already loaded";
 
         size = scheduler->models[model_id]->num_weights_pages;
@@ -782,8 +902,9 @@ bool Scheduler::GPU::schedule_load() {
         instance->model->invalidate_tracker();
     }
 
-    // Send the evict actions
+    // Send the evict actions (if any)
     for (auto &evict : evict_actions) {
+        std::cout << "send evict action for model " << evict->action->model_id << std::endl;
         send_action(evict);
     }
 
@@ -791,7 +912,9 @@ bool Scheduler::GPU::schedule_load() {
         return false;
     }
 
+    std::cout << "Free pages before loading: " << free_pages << std::endl;
     free_pages -= size;
+    std::cout << "Free pages after loading: " << free_pages << std::endl;
 
     uint64_t expected_duration = instance->model->estimate_weights();
 
@@ -895,7 +1018,7 @@ bool Scheduler::GPU::schedule_infer() {
 
         // Deactivate evicted model
         if (!strategy.instance->loaded) {  // If model instance is not loaded, that means it has been evicted
-            std::cout << "Model not loaded: " << strategy.instance->model->id << "\n";
+            // std::cout << "Model not loaded: " << strategy.instance->model->id << "\n";
             strategy.instance->deactivate();
             continue;
         }
@@ -906,10 +1029,6 @@ bool Scheduler::GPU::schedule_infer() {
         schedule_infer_action_attempted++;
         if (action != nullptr) {
             schedule_infer_action_created++;
-            // Print for every 10 infer action created
-            if (schedule_infer_action_created % 5 == 0) {
-                std::cout << "Infer action created: " << schedule_infer_action_created << "\n";
-            }
             send_action(action);
             active = true;
             add_model_strategies(strategy.instance);
@@ -925,7 +1044,6 @@ bool Scheduler::GPU::schedule_infer() {
     } else {
         schedule_infer_inactive_count++;
     }
-
     return active;
 }
 
@@ -966,7 +1084,8 @@ void Scheduler::GPU::infer_success(InferAction* action, std::shared_ptr<workerap
 
     action->set_result(result);
     action->telemetry.goodput = action->complete(util::now(), id);
-    scheduler->printer->log(action->telemetry);
+    // scheduler->printer->log(action->telemetry);  // commented this out because we don't need it for orion
+
     delete action;
 }
 
@@ -1031,7 +1150,7 @@ void Scheduler::GPU::load_success(LoadWeightsAction* action, std::shared_ptr<wor
     // TODO: change this?
     action->telemetry.goodput = 1.0;
 
-    scheduler->printer->log(action->telemetry);
+    // scheduler->printer->log(action->telemetry); // commented this out because we don't need it for orion
 
     delete action;
 }
@@ -1066,7 +1185,7 @@ void Scheduler::GPU::evict_success(EvictWeightsAction* action, std::shared_ptr<w
 
     action->set_result(result);
 
-    scheduler->printer->log(action->telemetry);
+    // scheduler->printer->log(action->telemetry); // commented this out because we don't need it for orion
 
     delete action;
 }
@@ -1179,13 +1298,20 @@ void Scheduler::initialize_model_instances() {
         for (unsigned j = 0; j < models.size(); j++) {
             Model* model = models[j];
             ModelInstance* instance = new ModelInstance(gpu, model);
-            instance->loaded = true;
             model->instances[i] = instance;
             gpu->instances[j] = instance;
         }
     }
 
     tracker = new LoadTracker(gpus.size(), models.size(), default_slo);
+    // TODO(neolou): lines under are all manual fixes
+    tracker->detach(tracker->models[0]);
+    tracker->addGPU(tracker->models[0], tracker->gpus[0]);
+    tracker->addGPUcomplete(tracker->models[0], tracker->gpus[0]);
+    models[0]->instances[0]->loaded = true;
+    gpus[0]->instances[0]->loaded = true;
+    tracker->attach(tracker->gpus[0]);
+    // end of manual fixes
     for (auto model : models) {
         model->tracker = tracker->newModelTracker(model->id);
     }
@@ -1250,8 +1376,6 @@ void Scheduler::run_gpu_stats_printer_thread() {
 }
 
 void Scheduler::initialize_network(std::vector<network::controller::WorkerConnection*> workers) {
-    std::cout << "----------------workflow: src/clockwork/controller/infer5/infer5_scheduler.cpp: Scheduler::initialize_network" << std::endl;
-    std::cout << "----------------This initializes the network executor" << std::endl;
     auto transmitComplete = [this]() {
         this->network->sendComplete();
     };

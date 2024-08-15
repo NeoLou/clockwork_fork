@@ -56,9 +56,11 @@ include_directories(${PYTHON_INCLUDE_DIRS})
 
 ######################## gRPC settings #########################################
 include_directories(${gRPC_INCLUDE_DIRS})
-#get_filename_component(clockwork_grpc_proto_file "proto/clockwork_grpc.proto" ABSOLUTE) # gRPC proto file
-get_filename_component(cluster_comm_proto_file "/home/neolou/workspace/orion-test/orion_dev/cluster_scheduling/src/protos/cluster_comm.proto" ABSOLUTE)
-get_filename_component(cluster_comm_proto_file_dir "${cluster_comm_proto_file}" PATH)
+# get_filename_component(clockwork_grpc_proto_file "proto/clockwork_grpc.proto" ABSOLUTE) # gRPC proto file
+
+# Get proto file path, file path is relative from base dir (which is cmake source dir = clockwork-fork)
+get_filename_component(cluster_comm_proto_file_path "${CMAKE_CURRENT_LIST_DIR}/../orion_dev/cluster_scheduling/src/protos/cluster_comm.proto" REALPATH)
+get_filename_component(cluster_comm_proto_file_dir "${cluster_comm_proto_file_path}" PATH)
 set(cluster_comm_proto_srcs "${CMAKE_CURRENT_BINARY_DIR}/cluster_comm.pb.cc")
 set(cluster_comm_proto_hdrs "${CMAKE_CURRENT_BINARY_DIR}/cluster_comm.pb.h")
 set(cluster_comm_grpc_srcs "${CMAKE_CURRENT_BINARY_DIR}/cluster_comm.grpc.pb.cc")
@@ -71,8 +73,8 @@ add_custom_command(
         --cpp_out "${CMAKE_CURRENT_BINARY_DIR}"
         -I "${cluster_comm_proto_file_dir}"
         --plugin=protoc-gen-grpc=`which grpc_cpp_plugin`
-        "${cluster_comm_proto_file}"
-      DEPENDS "${cluster_comm_proto_file}")
+        "${cluster_comm_proto_file_path}"
+      DEPENDS "${cluster_comm_proto_file_path}")
 # Include generated *.pb.h files and link lib
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 add_library(cluster_comm_proto_lib

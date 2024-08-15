@@ -35,7 +35,6 @@ private:
 		if (outstanding.size() > 0) {
 			work_begin = std::max(work_begin, outstanding.front().work_begin);
 		}
-		// std::cout << "Updated work_begin to: " << work_begin << ", total_outstanding: " << total_outstanding << std::endl;
 	}
 
 public:
@@ -50,7 +49,7 @@ public:
 			// Outstanding work has mysteriously not completed
 			work_begin = now - lag - outstanding.front().size / clock_;
 		}
-		// std::cout << "work_begin: " << work_begin << ", total_outstanding / clock_: " << total_outstanding / clock_ << ", now: " << now << std::endl;
+		// std::cout << "work_begin: " << work_begin << ", total_outstanding, " << total_outstanding << ", clock_: " << clock_ << ", now: " << now << ", future: " << future << std::endl;
 		return std::max(work_begin + total_outstanding / clock_, now + future);
 	}
 

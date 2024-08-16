@@ -588,6 +588,7 @@ void Scheduler::GPU::grpc_send_action(InferAction* action, uint64_t send_by) {
         infer_req.set_request_local_id(req->id);
         infer_req.set_client_id(req->request.header.user_id);
         infer_req.set_model_id(req->model->id);
+        infer_req.set_gpu_local_id(gpu_id);
         infer_req.set_slo(req->slo);
         *infer_req.mutable_input_tensor() = input_tensor;
 
@@ -610,18 +611,18 @@ void Scheduler::GPU::grpc_send_action(InferAction* action, uint64_t send_by) {
     rpc->Finish(&reply, &status, (void*)1);
 
     // Error check
-    // void* got_tag;
-    // bool ok = false;
-    // CHECK(cq.Next(&got_tag, &ok));
-    // CHECK_EQ(got_tag, (void*)1);
-    // CHECK(ok);
-    // if (status.ok()) {
+    void* got_tag;
+    bool ok = false;
+    CHECK(cq.Next(&got_tag, &ok));
+    CHECK_EQ(got_tag, (void*)1);
+    CHECK(ok);
+    if (status.ok()) {
     //   std::cout << "RPC successful" << std::endl;
-    // } else {
-    //   std::cout << "RPC failed" << std::endl;
-    //   std::cout << status.error_code() << ": " << status.error_message()
-    //             << std::endl;
-    // }
+    } else {
+      std::cout << "Infer RPC failed" << std::endl;
+      std::cout << status.error_code() << ": " << status.error_message()
+                << std::endl;
+    }
 }
 
 void Scheduler::GPU::grpc_send_action(LoadWeightsAction* action, uint64_t send_by) {
@@ -660,18 +661,18 @@ void Scheduler::GPU::grpc_send_action(LoadWeightsAction* action, uint64_t send_b
     rpc->Finish(&reply, &status, (void*)1);
 
     // Error check
-    // void* got_tag;
-    // bool ok = false;
-    // CHECK(cq.Next(&got_tag, &ok));
-    // CHECK_EQ(got_tag, (void*)1);
-    // CHECK(ok);
-    // if (status.ok()) {
+    void* got_tag;
+    bool ok = false;
+    CHECK(cq.Next(&got_tag, &ok));
+    CHECK_EQ(got_tag, (void*)1);
+    CHECK(ok);
+    if (status.ok()) {
     //   std::cout << "RPC successful" << std::endl;
-    // } else {
-    //   std::cout << "RPC failed" << std::endl;
-    //   std::cout << status.error_code() << ": " << status.error_message()
-    //             << std::endl;
-    // }
+    } else {
+      std::cout << "LoadWeights RPC failed" << std::endl;
+      std::cout << status.error_code() << ": " << status.error_message()
+                << std::endl;
+    }
 }
 
 void Scheduler::GPU::grpc_send_action(EvictWeightsAction* action, uint64_t send_by) {
@@ -712,18 +713,18 @@ void Scheduler::GPU::grpc_send_action(EvictWeightsAction* action, uint64_t send_
     rpc->Finish(&reply, &status, (void*)1);
 
     // Error check
-    // void* got_tag;
-    // bool ok = false;
-    // CHECK(cq.Next(&got_tag, &ok));
-    // CHECK_EQ(got_tag, (void*)1);
-    // CHECK(ok);
-    // if (status.ok()) {
+    void* got_tag;
+    bool ok = false;
+    CHECK(cq.Next(&got_tag, &ok));
+    CHECK_EQ(got_tag, (void*)1);
+    CHECK(ok);
+    if (status.ok()) {
     //   std::cout << "RPC successful" << std::endl;
-    // } else {
-    //   std::cout << "RPC failed" << std::endl;
-    //   std::cout << status.error_code() << ": " << status.error_message()
-    //             << std::endl;
-    // }
+    } else {
+      std::cout << "EvictWeights RPC failed" << std::endl;
+      std::cout << status.error_code() << ": " << status.error_message()
+                << std::endl;
+    }
 }
 
 void Scheduler::GPU::send_action(InferAction* action) {
@@ -1274,6 +1275,15 @@ void Scheduler::initialize_gpus(std::vector<network::controller::WorkerConnectio
                 gpustate.id,
                 gpustate.weights_cache_total_pages
             );
+            // Modifying gpu free pages to reflect loaded models
+            auto worker_models = worker.models;
+            for (auto &model_id : gpustate.loaded_models) {
+                auto it = worker_models.find(model_id);
+                if (it != worker_models.end()) {
+                    gpu->free_pages -= it->second.num_weights_pages;
+                    std::cout << "GPU " << gpu->id << " has " << gpu->free_pages << " free pages due to loaded model " << model_id << std::endl;
+                }
+            }
             gpus.push_back(gpu);
 
             total_pages += gpu->pages;

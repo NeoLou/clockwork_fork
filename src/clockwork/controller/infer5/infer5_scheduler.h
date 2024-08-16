@@ -385,7 +385,7 @@ class Scheduler : public clockwork::Scheduler {
             return s.str();
         }
 
-     private:
+    //  private:
         tbb::queuing_mutex infer_mutex;
         tbb::queuing_mutex load_mutex;
 

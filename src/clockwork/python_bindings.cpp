@@ -123,7 +123,7 @@ extern "C" {
     }
 
     // Start the Clockwork scheduler, somewhat Based on: src/clockwork/controller/infer5/infer5_scheduler.cpp: void Scheduler::start(...)
-    void startScheduler(SCHED_T *scheduler, PyObject *model_node_dict, PyObject *gpus_dict, PyObject *model_placements_list, int max_message_length) {
+    void startScheduler(SCHED_T *scheduler, PyObject *model_node_dict, PyObject *gpus_dict, PyObject *loaded_model_placements_list, int max_message_length) {
         /*  C++ type definitions
         struct ClockworkState {
             size_t page_size;
@@ -194,7 +194,7 @@ extern "C" {
             batched_model_state.id = model_id_cpp;
             batched_model_state.weights_transfer_duration = 8372000L; // hard code for now, need to profile to know whats the value for our infrastructure
             // TODO(neolou): need to calculate weight of first model loaded in mem for free_pages
-            batched_model_state.num_weights_pages = 640;  // hard code, random value i chose, need to profile to know whats the value for our infrastructure
+            batched_model_state.num_weights_pages = 320;  // hard code, random value i chose, need to profile to know whats the value for our infrastructure
             std::vector<unsigned> supported_batch_sizes = {1, 2, 4, 8}; // hard code for now
             std::vector<uint64_t> batch_size_exec_times_nanos = {3322000L, 5271340L, 7495000L, 12439000L}; // hard code for now, need to profile to know whats the value for our infrastructure
             batched_model_state.supported_batch_sizes = supported_batch_sizes; 
@@ -244,9 +244,9 @@ extern "C" {
             gpu_state.weights_cache_total_pages = 10737418240L/16777216L;  // total_pages = cache_size / page_size (values from config/default.cfg)
 
             // Populate gpu_state.loaded_models
-            Py_ssize_t list_size = PyList_Size(model_placements_list);
+            Py_ssize_t list_size = PyList_Size(loaded_model_placements_list);
             for (Py_ssize_t i = 0; i < list_size; ++i) {  // Iterate over model placements
-                PyObject *model_p = PyList_GetItem(model_placements_list, i); // get model placement
+                PyObject *model_p = PyList_GetItem(loaded_model_placements_list, i); // get model placement
                 PyObject *model_p_gpu = PyObject_GetAttrString(model_p, "gpu"); // get gpu of model placement
                 if (gpu_id == PyLong_AsUnsignedLong(PyObject_GetAttrString(model_p_gpu, "local_id"))) {
                     // if gpu id matches, add model id to loaded models of gpu

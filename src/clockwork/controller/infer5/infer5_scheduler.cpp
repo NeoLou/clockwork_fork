@@ -590,7 +590,7 @@ void Scheduler::GPU::grpc_send_action(InferAction* action, uint64_t send_by) {
         infer_req.set_model_id(req->model->id);
         infer_req.set_gpu_local_id(gpu_id);
         infer_req.set_slo(req->slo);
-        *infer_req.mutable_input_tensor() = input_tensor;
+        *infer_req.mutable_input() = input_tensor;
 
         infer_reqs.push_back(infer_req);
     }
@@ -1280,6 +1280,7 @@ void Scheduler::initialize_gpus(std::vector<network::controller::WorkerConnectio
             for (auto &model_id : gpustate.loaded_models) {
                 auto it = worker_models.find(model_id);
                 if (it != worker_models.end()) {
+                    CHECK(it->second.num_weights_pages <= gpu->free_pages) << "Error, loaded model " << model_id << " has more weights than free pages on GPU " << gpu->id;
                     gpu->free_pages -= it->second.num_weights_pages;
                     std::cout << "GPU " << gpu->id << " has " << gpu->free_pages << " free pages due to loaded model " << model_id << std::endl;
                 }

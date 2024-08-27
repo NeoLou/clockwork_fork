@@ -587,7 +587,7 @@ void Scheduler::GPU::grpc_send_action(InferAction* action, uint64_t send_by) {
         infer_req.set_request_id(req->request.uuid);
         infer_req.set_request_local_id(req->id);
         infer_req.set_client_id(req->request.header.user_id);
-        infer_req.set_model_id(req->model->id);
+        infer_req.set_model_id((int32_t)req->model->id);
         infer_req.set_gpu_local_id(gpu_id);
         infer_req.set_slo(req->slo);
         *infer_req.mutable_input() = input_tensor;
@@ -607,7 +607,7 @@ void Scheduler::GPU::grpc_send_action(InferAction* action, uint64_t send_by) {
     batched_infer_req.set_time_message_sent(time_message_sent);
 
     std::unique_ptr<grpc::ClientAsyncResponseReader<cluster_comm::Empty>> rpc(
-        stub_->AsyncsendBatchInferReq(&context, batched_infer_req, &cq));
+        stub_->AsyncinferRequest(&context, batched_infer_req, &cq));
     rpc->Finish(&reply, &status, (void*)1);
 
     // Error check
